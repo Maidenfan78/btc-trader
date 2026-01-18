@@ -1,0 +1,28 @@
+{
+  "name": "btc-trader",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Personal BTC/Crypto trading bot using trading-bot-platform",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "start:runner": "node dist/bot-runner.js",
+    "start:bot": "node dist/bot-runner.js --bot-id",
+    "start:dashboard": "node dist/dashboard.js",
+    "dev": "ts-node src/index.ts",
+    "dev:runner": "ts-node src/bot-runner.ts",
+    "dev:dashboard": "ts-node src/dashboard.ts"
+  },
+  "dependencies": {
+    "trading-bot-platform": "file:../trading-bot-platform",
+    "@jup-ag/api": "^6.0.48",
+    "@solana/spl-token": "^0.4.14",
+    "@solana/web3.js": "^1.98.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  }
+}

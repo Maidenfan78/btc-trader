@@ -1,0 +1,19 @@
+[Unit]
+Description=BTC Trading Dashboard API
+After=network.target
+
+[Service]
+Type=simple
+User=sav
+WorkingDirectory=/home/sav/btc-trader
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /home/sav/btc-trader/dist/dashboard.js
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

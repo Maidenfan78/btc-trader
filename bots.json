@@ -1,0 +1,62 @@
+[
+  {
+    "id": "btc-daily",
+    "name": "BTC Daily MFI",
+    "stateFile": "state.json",
+    "logFile": "logs/bot-btc.log",
+    "serviceName": "bot@btc-daily",
+    "csvDir": "btc-daily",
+    "indicator": "mfi",
+    "timeframe": "1d"
+  },
+  {
+    "id": "4h-mfi",
+    "name": "4H MFI Multi-Asset",
+    "stateFile": "state-4h.json",
+    "logFile": "logs/bot-4h.log",
+    "serviceName": "bot@4h-mfi",
+    "csvDir": "4h-mfi",
+    "indicator": "mfi",
+    "timeframe": "4h"
+  },
+  {
+    "id": "tcf2",
+    "name": "4H TCF2 Multi-Asset",
+    "stateFile": "state-tcf2.json",
+    "logFile": "logs/bot-tcf2.log",
+    "serviceName": "bot@tcf2",
+    "csvDir": "tcf2",
+    "indicator": "tcf2",
+    "timeframe": "4h"
+  },
+  {
+    "id": "kpss",
+    "name": "4H KPSS Multi-Asset",
+    "stateFile": "state-kpss.json",
+    "logFile": "logs/bot-kpss.log",
+    "serviceName": "bot@kpss",
+    "csvDir": "kpss",
+    "indicator": "kpss",
+    "timeframe": "4h"
+  },
+  {
+    "id": "tdfi",
+    "name": "4H TDFI Multi-Asset",
+    "stateFile": "state-tdfi.json",
+    "logFile": "logs/bot-tdfi.log",
+    "serviceName": "bot@tdfi",
+    "csvDir": "tdfi",
+    "indicator": "tdfi",
+    "timeframe": "4h"
+  },
+  {
+    "id": "dssmom",
+    "name": "4H DSS-MOM Multi-Asset",
+    "stateFile": "state-dssmom.json",
+    "logFile": "logs/bot-dssmom.log",
+    "serviceName": "bot@dssmom",
+    "csvDir": "dssmom",
+    "indicator": "dssmom",
+    "timeframe": "4h"
+  }
+]

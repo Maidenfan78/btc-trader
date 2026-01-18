@@ -1,0 +1,20 @@
+[Unit]
+Description=BTC Trading Bot %i
+After=network.target
+
+[Service]
+Type=simple
+User=sav
+WorkingDirectory=/home/sav/btc-trader
+Environment=NODE_ENV=production
+Environment=BOT_ID=%i
+ExecStart=/usr/bin/node /home/sav/btc-trader/dist/bot-runner.js --bot-id %i
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=append:/home/sav/btc-trader/logs/bot-%i.log
+StandardError=append:/home/sav/btc-trader/logs/error-%i.log
+
+[Install]
+WantedBy=multi-user.target

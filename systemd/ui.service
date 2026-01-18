@@ -1,0 +1,20 @@
+[Unit]
+Description=BTC Trading Dashboard UI
+After=network.target
+
+[Service]
+Type=simple
+User=sav
+WorkingDirectory=/home/sav/btc-trader
+Environment=NODE_ENV=production
+Environment=UI_PORT=5173
+ExecStart=/usr/bin/node /home/sav/btc-trader/dist/ui-server.js
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

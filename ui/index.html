@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BTC Trader Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="bg-orb orb-a"></div>
+    <div class="bg-orb orb-b"></div>
+    <div class="bg-orb orb-c"></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">₿</div>
+        <div>
+          <h1>BTC Trader</h1>
+          <p class="subtitle">Live Ops Control Room</p>
+        </div>
+      </div>
+      <div class="status-strip">
+        <div class="status-pill" id="health-pill">API: checking…</div>
+        <div class="status-pill" id="updated-pill">Updated: --</div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel overview">
+        <div class="panel-header">
+          <h2>Fleet Overview</h2>
+          <button class="ghost" id="refresh-btn">Refresh</button>
+        </div>
+        <div class="metrics" id="metrics">
+          <div class="metric">
+            <span>Bots</span>
+            <strong id="metric-bots">--</strong>
+          </div>
+          <div class="metric">
+            <span>Running</span>
+            <strong id="metric-running">--</strong>
+          </div>
+          <div class="metric">
+            <span>Open Legs</span>
+            <strong id="metric-positions">--</strong>
+          </div>
+        </div>
+        <div class="bot-grid" id="bot-grid"></div>
+      </section>
+
+      <section class="panel details">
+        <div class="panel-header">
+          <div>
+            <h2 id="detail-title">Bot Details</h2>
+            <p class="subtitle" id="detail-subtitle">Select a bot to inspect.</p>
+          </div>
+          <div class="actions">
+            <button class="primary" id="start-btn">Start</button>
+            <button class="danger" id="stop-btn">Stop</button>
+            <button class="ghost" id="restart-btn">Restart</button>
+          </div>
+        </div>
+
+        <div class="detail-grid">
+          <div class="card">
+            <h3>Open Positions</h3>
+            <div class="table" id="positions-table">
+              <div class="table-row header">
+                <span>Asset</span>
+                <span>Qty</span>
+                <span>Entry</span>
+                <span>Now</span>
+                <span>PnL</span>
+              </div>
+              <div class="table-row muted">No data yet.</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Recent Logs</h3>
+            <div class="logs" id="logs-box">No logs loaded.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel auth">
+        <div class="panel-header">
+          <h2>Admin Access</h2>
+        </div>
+        <form id="login-form">
+          <label>
+            Username
+            <input type="text" id="login-username" autocomplete="username" />
+          </label>
+          <label>
+            Password
+            <input type="password" id="login-password" autocomplete="current-password" />
+          </label>
+          <button class="primary" type="submit">Sign In</button>
+          <p class="hint" id="login-status">Token required for start/stop actions.</p>
+        </form>
+      </section>
+    </main>
+
+    <script src="/config.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

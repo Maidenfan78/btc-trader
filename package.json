@@ -10,9 +10,11 @@
     "start:runner": "node dist/bot-runner.js",
     "start:bot": "node dist/bot-runner.js --bot-id",
     "start:dashboard": "node dist/dashboard.js",
+    "start:ui": "node dist/ui-server.js",
     "dev": "ts-node src/index.ts",
     "dev:runner": "ts-node src/bot-runner.ts",
-    "dev:dashboard": "ts-node src/dashboard.ts"
+    "dev:dashboard": "ts-node src/dashboard.ts",
+    "dev:ui": "ts-node src/ui-server.ts"
   },
   "dependencies": {
     "trading-bot-platform": "file:../trading-bot-platform",

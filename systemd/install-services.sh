@@ -13,6 +13,7 @@ echo "Installing btc-trader services..."
 # Copy service files
 cp "$SCRIPT_DIR/bot@.service" "$SYSTEMD_DIR/"
 cp "$SCRIPT_DIR/dashboard.service" "$SYSTEMD_DIR/"
+cp "$SCRIPT_DIR/ui.service" "$SYSTEMD_DIR/"
 
 # Reload systemd
 systemctl daemon-reload
@@ -22,6 +23,10 @@ echo ""
 echo "  # Dashboard"
 echo "  sudo systemctl enable dashboard"
 echo "  sudo systemctl start dashboard"
+echo ""
+echo "  # UI"
+echo "  sudo systemctl enable ui"
+echo "  sudo systemctl start ui"
 echo ""
 echo "  # Bots (use bot ID from bots.json)"
 echo "  sudo systemctl enable bot@btc-daily"

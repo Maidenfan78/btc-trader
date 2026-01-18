@@ -116,11 +116,22 @@ BOT_ENV_FILE=.env.4h node dist/bots/mfi-4h.js
 node dist/bot-runner.js --bot-id 4h-mfi
 ```
 
-### Dashboard
+### Dashboard API
 
 ```bash
 node dist/dashboard.js
 ```
+
+### Dashboard UI
+
+The UI is a lightweight web app served by `ui-server` on port 5173.
+
+```bash
+node dist/ui-server.js
+```
+
+By default it proxies `/api/*` to the dashboard API on port 3001. If you want
+to point it somewhere else, set `DASHBOARD_API_URL`.
 
 ## Configuration
 

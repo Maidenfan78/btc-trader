@@ -305,6 +305,24 @@ h2 {
   line-height: 1.5;
 }
 
+.logs .log-error {
+  color: #ff6b6b;
+  font-weight: 600;
+}
+
+.logs .log-warn {
+  color: #ffd93d;
+}
+
+.logs .log-signal {
+  color: #6bcb77;
+  font-weight: 600;
+}
+
+.logs .log-trade {
+  color: #4d96ff;
+}
+
 .auth label {
   display: block;
   font-size: 13px;

@@ -112,10 +112,25 @@ function updateMetrics() {
     const open = bot.state?.openPositionCount || 0;
     return sum + open;
   }, 0);
+  const totalPnL = Object.values(state.status).reduce((sum, bot) => {
+    const pnl = bot.state?.performance?.totalPnL || 0;
+    return sum + pnl;
+  }, 0);
 
   metricsBots.textContent = botCount;
   metricsRunning.textContent = runningCount;
   metricsPositions.textContent = positionCount;
+
+  const metricsPnL = document.getElementById("metric-pnl");
+  if (metricsPnL) {
+    metricsPnL.textContent = formatPnL(totalPnL);
+    metricsPnL.className = totalPnL >= 0 ? "pnl-positive" : "pnl-negative";
+  }
+}
+
+function formatPnL(value) {
+  const sign = value >= 0 ? "+" : "";
+  return `${sign}$${value.toFixed(2)}`;
 }
 
 function renderBots() {
@@ -123,12 +138,20 @@ function renderBots() {
   state.bots.forEach((bot) => {
     const status = state.status[bot.id] || {};
     const running = status.running;
+    const perf = status.state?.performance || {};
+    const pnl = perf.totalPnL || 0;
+    const trades = perf.totalTrades || 0;
+    const winRate = perf.winRate || 0;
+
     const card = document.createElement("div");
     card.className = `bot-card ${state.selectedBot === bot.id ? "active" : ""}`;
     card.innerHTML = `
       <h4>${bot.name}</h4>
       <div class="meta">${bot.indicator.toUpperCase()} • ${bot.timeframe.toUpperCase()}</div>
-      <div class="meta">Service: ${bot.serviceName}</div>
+      <div class="bot-stats">
+        <span class="${pnl >= 0 ? "pnl-positive" : "pnl-negative"}">${formatPnL(pnl)}</span>
+        <span class="meta">${trades} trades${trades > 0 ? ` (${(winRate * 100).toFixed(0)}% win)` : ""}</span>
+      </div>
       <div class="badge ${running ? "" : "offline"}">${running ? "Running" : "Stopped"}</div>
     `;
     card.addEventListener("click", () => selectBot(bot.id));

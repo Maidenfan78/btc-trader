@@ -143,7 +143,7 @@ h2 {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -198,6 +198,24 @@ h2 {
 .bot-card .meta {
   font-size: 12px;
   color: var(--muted);
+}
+
+.bot-stats {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.pnl-positive {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.pnl-negative {
+  color: var(--danger);
+  font-weight: 600;
 }
 
 .badge {
@@ -368,7 +386,7 @@ button:hover {
   }
 
   .metrics {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .table-row {

@@ -218,6 +218,20 @@ h2 {
   font-weight: 600;
 }
 
+.trend-bull {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.trend-bear {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.trend-neutral {
+  color: var(--muted);
+}
+
 .badge {
   display: inline-flex;
   align-items: center;

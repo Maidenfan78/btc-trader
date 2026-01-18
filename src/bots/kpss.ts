@@ -58,10 +58,28 @@ function loadState(assets: AssetConfig[]): MultiAssetBotState {
   return initializeMultiAssetState(assets);
 }
 
+// Indicator snapshot for dashboard display
+interface IndicatorSnapshot {
+  [asset: string]: {
+    price: number;
+    indicator: number;
+    indicator2?: number;
+    atr: number;
+    trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+    updatedAt: number;
+  };
+}
+
+let indicatorSnapshot: IndicatorSnapshot = {};
+
 function saveState(state: MultiAssetBotState): void {
   const log = getKPSSLogger();
   try {
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+    const stateWithSnapshot = {
+      ...state,
+      indicatorSnapshot,
+    };
+    fs.writeFileSync(STATE_FILE, JSON.stringify(stateWithSnapshot, null, 2));
     log.info('State saved to disk');
   } catch (error) {
     log.error('Failed to save state:', error);
@@ -107,6 +125,18 @@ async function processAsset(
 
   log.info(`${asset.symbol} - Price: $${currentCandle.close.toFixed(2)}, ATR: $${currentATR.toFixed(2)}`);
   log.info(`${asset.symbol} - KPSS Value: ${currentKPSS.value.toFixed(2)}, Signal: ${currentKPSS.signal.toFixed(2)}`);
+
+  // Update indicator snapshot for dashboard
+  const indicatorTrend = currentKPSS.value > currentKPSS.signal ? 'BULLISH' :
+                         currentKPSS.value < currentKPSS.signal ? 'BEARISH' : 'NEUTRAL';
+  indicatorSnapshot[asset.symbol] = {
+    price: currentCandle.close,
+    indicator: currentKPSS.value,
+    indicator2: currentKPSS.signal,
+    atr: currentATR,
+    trend: indicatorTrend,
+    updatedAt: Date.now(),
+  };
 
   // Update existing positions
   const assetPos = getAssetPositions(state, asset.symbol);

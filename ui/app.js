@@ -170,8 +170,47 @@ async function selectBot(botId, preserve = false) {
     renderBots();
   }
 
-  await Promise.all([loadPositions(botId), loadLogs(botId)]);
+  await Promise.all([loadSignals(botId), loadPositions(botId), loadLogs(botId)]);
   bindControlButtons(botId);
+}
+
+function loadSignals(botId) {
+  const signalsTable = document.getElementById("signals-table");
+  const status = state.status[botId];
+  const snapshot = status?.state?.indicatorSnapshot;
+
+  if (!snapshot || Object.keys(snapshot).length === 0) {
+    signalsTable.innerHTML = `
+      <div class="table-row header">
+        <span>Asset</span><span>Price</span><span>Indicator</span><span>Trend</span>
+      </div>
+      <div class="table-row muted">No signal data yet.</div>
+    `;
+    return;
+  }
+
+  const rows = Object.entries(snapshot).map(([asset, data]) => {
+    const trendClass = data.trend === "BULLISH" ? "trend-bull" :
+                       data.trend === "BEARISH" ? "trend-bear" : "trend-neutral";
+    const trendIcon = data.trend === "BULLISH" ? "▲" :
+                      data.trend === "BEARISH" ? "▼" : "●";
+    const indicator2 = data.indicator2 !== undefined ? ` / ${data.indicator2.toFixed(2)}` : "";
+    return `
+      <div class="table-row">
+        <span>${asset}</span>
+        <span>$${data.price.toFixed(2)}</span>
+        <span>${data.indicator.toFixed(2)}${indicator2}</span>
+        <span class="${trendClass}">${trendIcon} ${data.trend}</span>
+      </div>
+    `;
+  }).join("");
+
+  signalsTable.innerHTML = `
+    <div class="table-row header">
+      <span>Asset</span><span>Price</span><span>Indicator</span><span>Trend</span>
+    </div>
+    ${rows}
+  `;
 }
 
 function bindControlButtons(botId) {

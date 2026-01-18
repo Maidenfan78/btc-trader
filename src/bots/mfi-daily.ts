@@ -67,8 +67,25 @@ function loadState(): BotState {
   return getDefaultState();
 }
 
+// Indicator snapshot for dashboard display
+interface IndicatorSnapshot {
+  [asset: string]: {
+    price: number;
+    indicator: number;
+    atr: number;
+    trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+    updatedAt: number;
+  };
+}
+
+let indicatorSnapshot: IndicatorSnapshot = {};
+
 function saveState(state: BotState): void {
-  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+  const stateWithSnapshot = {
+    ...state,
+    indicatorSnapshot,
+  };
+  fs.writeFileSync(STATE_FILE, JSON.stringify(stateWithSnapshot, null, 2));
 }
 
 /**
@@ -129,7 +146,7 @@ async function runBotCycle() {
         rpcUrl: config.solanaRpcUrl,
         walletSecretKey: config.walletSecretKey,
         usdcMint: config.usdcMint,
-        cbBtcMint: config.cbBtcMint,
+        cbBtcMint: config.cbBtcMint || '',
         wbtcMint: config.wbtcMint,
         slippageBps: config.slippageBps,
         maxPriceImpactBps: config.maxPriceImpactBps,
@@ -149,7 +166,7 @@ async function runBotCycle() {
         connection,
         walletPublicKey,
         config.usdcMint,
-        config.cbBtcMint,
+        config.cbBtcMint || '',
         config.wbtcMint
       );
 
@@ -201,6 +218,17 @@ async function runBotCycle() {
       currentMFI: currentMFI.toFixed(2),
       currentATR: currentATR.toFixed(2),
     });
+
+    // Update indicator snapshot for dashboard
+    const trend = currentMFI <= config.mfiBuyLevel ? 'BULLISH' :
+                  currentMFI >= config.mfiSellLevel ? 'BEARISH' : 'NEUTRAL';
+    indicatorSnapshot['BTC'] = {
+      price: latestCandle.close,
+      indicator: currentMFI,
+      atr: currentATR,
+      trend,
+      updatedAt: Date.now(),
+    };
 
     // Update existing positions
     if (state.openLegs.length > 0) {

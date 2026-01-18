@@ -15,8 +15,8 @@ export interface MFIDailyConfig {
 
   // Tokens
   usdcMint: string;
-  cbBtcMint: string;
   wbtcMint: string;
+  cbBtcMint?: string;
 
   // MFI Settings
   mfiPeriod: number;

@@ -53,7 +53,7 @@ export function loadMFI4HConfig(): MultiAssetConfig {
     solanaRpcBackup: getOptionalEnv('SOLANA_RPC_BACKUP', 'https://api.mainnet-beta.solana.com'),
 
     // Wallet
-    walletSecretKey: getRequiredEnv('WALLET_SECRET_KEY'),
+    walletSecretKey: getOptionalEnv('WALLET_SECRET_KEY', ''),
 
     // Tokens
     usdcMint: getRequiredEnv('USDC_MINT'),
@@ -130,6 +130,12 @@ function validateMultiAssetConfig(config: MultiAssetConfig, log: Logger): void {
   // Safety check for live trading
   if (!config.paperMode && !config.liveTradingEnabled) {
     throw new Error('PAPER_MODE=false requires LIVE_TRADING_ENABLED=true');
+  }
+  if (!config.paperMode && !config.walletSecretKey) {
+    throw new Error('WALLET_SECRET_KEY is required for live trading');
+  }
+  if (config.paperMode && !config.walletSecretKey) {
+    log.warn('WALLET_SECRET_KEY is not set. Paper trading will run without a wallet.');
   }
 
   log.info('Configuration validation passed');

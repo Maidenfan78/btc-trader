@@ -10,7 +10,7 @@ This is a private trading application that uses the reusable `trading-bot-platfo
 
 | Bot | File | Strategy | Timeframe | Assets |
 |-----|------|----------|-----------|--------|
-| MFI Daily | `mfi-daily.ts` | MFI crossover | 1D | BTC (cbBTC/WBTC) |
+| MFI Daily | `mfi-daily.ts` | MFI crossover | 1D | BTC (WBTC) |
 | MFI 4H | `mfi-4h.ts` | MFI crossover | 4H | wETH, SOL, JUP |
 | TCF2 | `tcf2.ts` | Trend Continuation Factor | 4H | wETH, SOL, JUP |
 | KPSS | `kpss.ts` | Kase Permission Stochastic | 4H | wETH, SOL, JUP |
@@ -86,7 +86,6 @@ cp .env.example .env
    - `SOLANA_RPC_URL` - Solana RPC endpoint
    - `WALLET_SECRET_KEY` - Your wallet's secret key (base58)
    - `USDC_MINT` - USDC token mint address
-   - `CB_BTC_MINT` - cbBTC mint (for daily bot)
    - `WBTC_MINT` - WBTC mint (for daily bot)
 
 3. Per-bot config files (`.env.4h`, `.env.tcf2`, etc.) override global settings

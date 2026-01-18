@@ -11,13 +11,18 @@ import { MFIDailyConfig } from './types';
 loadEnvConfig('.env');
 
 export function loadMFIDailyConfig(): MFIDailyConfig {
+  const paperMode = getBooleanEnv('PAPER_MODE', true);
+  const liveTradingEnabled = getBooleanEnv('LIVE_TRADING_ENABLED', false);
+
   const required = [
     'SOLANA_RPC_URL',
-    'WALLET_SECRET_KEY',
     'USDC_MINT',
-    'CB_BTC_MINT',
     'WBTC_MINT',
   ];
+
+  if (!paperMode || liveTradingEnabled) {
+    required.push('WALLET_SECRET_KEY');
+  }
 
   const missing = required.filter(key => !process.env[key]);
 
@@ -25,18 +30,20 @@ export function loadMFIDailyConfig(): MFIDailyConfig {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
   }
 
+  const cbBtcMintEnv = getOptionalEnv('CB_BTC_MINT', '');
+
   const config: MFIDailyConfig = {
     // RPC
     solanaRpcUrl: getRequiredEnv('SOLANA_RPC_URL'),
     solanaRpcBackup: getOptionalEnv('SOLANA_RPC_BACKUP', 'https://api.mainnet-beta.solana.com'),
 
     // Wallet
-    walletSecretKey: getRequiredEnv('WALLET_SECRET_KEY'),
+    walletSecretKey: getOptionalEnv('WALLET_SECRET_KEY', ''),
 
     // Tokens
     usdcMint: getRequiredEnv('USDC_MINT'),
-    cbBtcMint: getRequiredEnv('CB_BTC_MINT'),
     wbtcMint: getRequiredEnv('WBTC_MINT'),
+    cbBtcMint: cbBtcMintEnv || undefined,
 
     // MFI
     mfiPeriod: getNumericEnv('MFI_PERIOD', 14),
@@ -61,8 +68,8 @@ export function loadMFIDailyConfig(): MFIDailyConfig {
     maxPriceImpactBps: getNumericEnv('MAX_PRICE_IMPACT_BPS', 100),
 
     // Mode
-    paperMode: getBooleanEnv('PAPER_MODE', true),
-    liveTradingEnabled: getBooleanEnv('LIVE_TRADING_ENABLED', false),
+    paperMode,
+    liveTradingEnabled,
 
     // Data
     candleSource: getOptionalEnv('CANDLE_SOURCE', 'binance'),
@@ -76,6 +83,10 @@ export function loadMFIDailyConfig(): MFIDailyConfig {
     checkIntervalMinutes: getNumericEnv('CHECK_INTERVAL_MINUTES', 15),
     executionOffsetMinutes: getNumericEnv('EXECUTION_OFFSET_MINUTES', 15),
   };
+
+  if (!config.cbBtcMint) {
+    console.warn('CB_BTC_MINT not set. Using WBTC only for BTC trades.');
+  }
 
   // Validation
   if (config.mfiPeriod < 1 || config.mfiPeriod > 100) {
@@ -97,6 +108,12 @@ export function loadMFIDailyConfig(): MFIDailyConfig {
   // Safety check
   if (config.liveTradingEnabled && config.paperMode) {
     throw new Error('Cannot enable LIVE_TRADING_ENABLED while PAPER_MODE is true');
+  }
+  if (!config.paperMode && !config.walletSecretKey) {
+    throw new Error('WALLET_SECRET_KEY is required for live trading');
+  }
+  if (config.paperMode && !config.walletSecretKey) {
+    console.warn('WALLET_SECRET_KEY is not set. Paper trading will run without a wallet.');
   }
 
   if (config.checkIntervalMinutes < 1 || config.checkIntervalMinutes > 1440) {

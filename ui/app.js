@@ -227,7 +227,11 @@ async function loadLogs(botId) {
   }
   const data = await response.json();
   const logs = data.logs || [];
-  logsBox.textContent = logs.join("\n");
+  const lines = logs.map((log) => {
+    if (typeof log === "string") return log;
+    return log.message || JSON.stringify(log);
+  });
+  logsBox.textContent = lines.join("\n");
 }
 
 refreshAll();

@@ -12,7 +12,7 @@
   {
     "id": "4h-mfi",
     "name": "4H MFI Multi-Asset",
-    "stateFile": "state-4h.json",
+    "stateFile": "state-4h-mfi.json",
     "logFile": "logs/bot-4h-mfi.log",
     "serviceName": "bot@4h-mfi",
     "csvDir": "4h-mfi",

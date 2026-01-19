@@ -85,7 +85,13 @@ let indicatorSnapshot: IndicatorSnapshot = {};
 // Initialize event store and journal emitter
 const dataDir = process.env.BOT_DATA_DIR || 'data';
 if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+  } catch (err) {
+    const log = getMFI4HLogger();
+    log.error(`Failed to create data directory: ${dataDir}`, err);
+    throw new Error(`Cannot create data directory: ${dataDir}`);
+  }
 }
 
 const eventStore = new EventStore({ dataDir });

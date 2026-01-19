@@ -19,10 +19,13 @@ export * from './config';
 // Re-export continuous mode handlers
 export * from './continuous';
 
-console.log('btc-trader - Personal Trading Bot');
-console.log('');
-console.log('Usage:');
-console.log('  npm run start:bot -- --bot-id <bot-id>  Run a specific bot');
-console.log('  npm run start:dashboard                  Start the dashboard');
-console.log('');
-console.log('Available bots are defined in bots.json');
+// Only show usage when run directly (not imported as a module)
+if (require.main === module) {
+  console.log('btc-trader - Personal Trading Bot');
+  console.log('');
+  console.log('Usage:');
+  console.log('  npm run start:bot -- --bot-id <bot-id>  Run a specific bot');
+  console.log('  npm run start:dashboard                  Start the dashboard');
+  console.log('');
+  console.log('Available bots are defined in bots.json');
+}

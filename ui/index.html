@@ -120,6 +120,32 @@
         </div>
       </section>
 
+      <section class="panel timeline-panel">
+        <div class="panel-header">
+          <h2>Activity Timeline</h2>
+          <div class="timeline-filters">
+            <select id="timeline-bot-filter">
+              <option value="">All Bots</option>
+            </select>
+            <select id="timeline-asset-filter">
+              <option value="">All Assets</option>
+            </select>
+            <select id="timeline-type-filter">
+              <option value="">All Events</option>
+              <option value="SIGNAL_GENERATED,SIGNAL_REJECTED">Signals</option>
+              <option value="POSITION_OPENED,TP_HIT,TRAILING_STOP_HIT,RUNNER_TRIMMED">Positions</option>
+              <option value="CYCLE_START,CYCLE_END">Cycles</option>
+              <option value="ERROR,TRADE_FAILED">Errors</option>
+            </select>
+            <button class="ghost" id="timeline-refresh-btn">Refresh</button>
+          </div>
+        </div>
+        <div class="timeline-feed" id="timeline-feed">
+          <div class="timeline-loading">Loading events...</div>
+        </div>
+        <button class="ghost timeline-load-more" id="timeline-load-more">Load More</button>
+      </section>
+
       <section class="panel auth">
         <div class="panel-header">
           <h2>Admin Access</h2>

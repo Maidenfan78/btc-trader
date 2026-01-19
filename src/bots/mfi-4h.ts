@@ -6,6 +6,7 @@
  */
 
 import * as fs from 'fs';
+import * as path from 'path';
 import {
   BinanceFetcher,
   calculateMFISeries,
@@ -28,9 +29,12 @@ import {
   AssetSignal,
   AssetConfig,
   MultiAssetManagerConfig,
+  EventStore,
+  JournalEmitter,
+  MarketContext,
 } from 'trading-bot-platform';
-import { loadMFI4HConfig, getMFI4HLogger } from '../config/mfi-4h';
-import { getAssets } from '../config/assets';
+import { loadMFI4HConfig, getMFI4HLogger } from '../config/mfi-4h.js';
+import { getAssets } from '../config/assets.js';
 
 const STATE_FILE = process.env.BOT_STATE_FILE || 'state-4h.json';
 
@@ -78,6 +82,22 @@ interface IndicatorSnapshot {
 
 let indicatorSnapshot: IndicatorSnapshot = {};
 
+// Initialize event store and journal emitter
+const dataDir = process.env.BOT_DATA_DIR || 'data';
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
+const eventStore = new EventStore({ dataDir });
+
+function createJournalEmitter(config: ReturnType<typeof loadMFI4HConfig>): JournalEmitter {
+  return new JournalEmitter({
+    botId: '4h-mfi',
+    mode: config.paperMode ? 'PAPER' : 'LIVE',
+    eventStore,
+  });
+}
+
 /**
  * Process a single asset
  */
@@ -86,7 +106,8 @@ async function processAsset(
   state: MultiAssetBotState,
   config: ReturnType<typeof loadMFI4HConfig>,
   broker: PaperBroker,
-  csvLogger: ReturnType<typeof createTradingCSVLogger>
+  csvLogger: ReturnType<typeof createTradingCSVLogger>,
+  journal: JournalEmitter
 ): Promise<AssetSignal | null> {
   const log = getMFI4HLogger();
 
@@ -115,6 +136,17 @@ async function processAsset(
   }
 
   log.info(`${asset.symbol} - Price: $${currentCandle.close.toFixed(2)}, MFI: ${currentMFI.toFixed(2)}, ATR: $${currentATR.toFixed(2)}`);
+
+  // Create market context for journal events
+  const marketContext = JournalEmitter.createMarketContext({
+    price: currentCandle.close,
+    indicator: currentMFI,
+    indicatorName: 'MFI',
+    atr: currentATR,
+    candleTime: currentCandle.timestamp,
+    buyLevel: config.mfiBuyLevel,
+    sellLevel: config.mfiSellLevel,
+  });
 
   // Update indicator snapshot for dashboard
   const trend = currentMFI <= config.mfiBuyLevel ? 'BULLISH' :
@@ -145,7 +177,7 @@ async function processAsset(
       config.breakEvenLockMultiplier
     );
 
-    // Log closed legs
+    // Log closed legs and emit journal events
     const closedLegs = updatedLegs.filter(l =>
       l.status === 'CLOSED' && !assetPos.openLegs.find(ol => ol.id === l.id && ol.status === 'CLOSED')
     );
@@ -153,6 +185,34 @@ async function processAsset(
       for (const leg of closedLegs) {
         log.info(`${asset.symbol}: ${leg.type} leg closed - ${leg.closeReason}, Entry: $${leg.entryPrice.toFixed(2)}, Exit: $${leg.closePrice?.toFixed(2)}`);
         csvLogger.logPositionLegClosure(leg, asset.symbol, config.paperMode ? 'PAPER' : 'LIVE');
+
+        // Emit journal event for closed leg
+        const pnlUsdc = leg.closePrice ? (leg.closePrice - leg.entryPrice) * leg.quantity : 0;
+        const pnlPercent = leg.closePrice ? ((leg.closePrice - leg.entryPrice) / leg.entryPrice) * 100 : 0;
+        const holdingPeriodMs = leg.closeTime ? leg.closeTime - leg.entryTime : 0;
+
+        if (leg.type === 'TP' && leg.closeReason === 'TP_HIT') {
+          journal.tpHit(asset.symbol, marketContext, {
+            legId: leg.id,
+            entryPrice: leg.entryPrice,
+            exitPrice: leg.closePrice || currentCandle.close,
+            quantity: leg.quantity,
+            pnlUsdc,
+            pnlPercent,
+            holdingPeriodMs,
+          }, leg.id);
+        } else if (leg.type === 'RUNNER' && leg.closeReason === 'TRAILING_STOP_HIT') {
+          journal.trailingStopHit(asset.symbol, marketContext, {
+            legId: leg.id,
+            entryPrice: leg.entryPrice,
+            exitPrice: leg.closePrice || currentCandle.close,
+            highestReached: leg.highestPrice || leg.entryPrice,
+            quantity: leg.quantity,
+            pnlUsdc,
+            pnlPercent,
+            holdingPeriodMs,
+          }, leg.id);
+        }
       }
     }
 
@@ -173,6 +233,16 @@ async function processAsset(
   if (isValidSignal(signal)) {
     log.info(`${asset.symbol}: Signal detected - ${signal.type}, MFI ${previousMFI.toFixed(2)} -> ${currentMFI.toFixed(2)}`);
 
+    // Emit signal generated event
+    journal.signalGenerated(asset.symbol, marketContext, {
+      signalType: signal.type as 'LONG' | 'SHORT',
+      previousIndicator: previousMFI,
+      currentIndicator: currentMFI,
+      buyLevel: config.mfiBuyLevel,
+      sellLevel: config.mfiSellLevel,
+      crossDirection: signal.type === 'LONG' ? 'UP' : 'DOWN',
+    });
+
     return {
       type: signal.type,
       asset: asset.symbol,
@@ -183,6 +253,16 @@ async function processAsset(
     };
   }
 
+  // Emit no signal event
+  journal.noSignal(asset.symbol, marketContext, {
+    indicatorValue: currentMFI,
+    buyLevel: config.mfiBuyLevel,
+    sellLevel: config.mfiSellLevel,
+    reason: currentMFI > config.mfiBuyLevel && currentMFI < config.mfiSellLevel
+      ? 'MFI between levels'
+      : 'No crossover detected',
+  });
+
   log.info(`${asset.symbol}: No signal (MFI: ${currentMFI.toFixed(2)})`);
   return null;
 }
@@ -191,11 +271,16 @@ async function processAsset(
  * Main bot execution cycle
  */
 async function runBotCycle4H() {
+  const cycleStartTime = Date.now();
   const config = loadMFI4HConfig();
   const allAssets = getAssets();
   const assets = getEnabledAssets(allAssets);
   const state = loadState(allAssets);
   const log = getMFI4HLogger();
+
+  // Initialize journal emitter
+  const journal = createJournalEmitter(config);
+  journal.startCycle();
 
   // Create multi-asset manager config
   const managerConfig: MultiAssetManagerConfig = {
@@ -230,16 +315,42 @@ async function runBotCycle4H() {
   log.info(`Trading ${assets.length} assets: ${assets.map(a => a.symbol).join(', ')}`);
   log.info(`Total capital per full signal: $${getTotalCapitalPerSignal(allAssets)}`);
 
+  // Emit cycle start event
+  const cycleStartMarket = JournalEmitter.createMarketContext({
+    price: 0,
+    indicator: 0,
+    indicatorName: 'MFI',
+    atr: 0,
+    candleTime: Date.now(),
+    buyLevel: config.mfiBuyLevel,
+    sellLevel: config.mfiSellLevel,
+  });
+  journal.cycleStart(cycleStartMarket, {
+    assetsToProcess: assets.map(a => a.symbol),
+    totalOpenPositions: getTotalOpenPositions(state),
+  });
+
+  // Track cycle metrics
+  let positionsOpened = 0;
+  let positionsClosed = 0;
+  let runnersTrimmed = 0;
+
   // Process each asset
   const signals: AssetSignal[] = [];
   for (const asset of assets) {
     try {
-      const signal = await processAsset(asset, state, config, broker, csvLogger);
+      const signal = await processAsset(asset, state, config, broker, csvLogger, journal);
       if (signal) {
         signals.push(signal);
       }
     } catch (error) {
       log.error(`Error processing ${asset.symbol}:`, error);
+      // Emit error event
+      journal.error(asset.symbol, cycleStartMarket, {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        context: 'processAsset',
+      });
     }
   }
 
@@ -272,6 +383,21 @@ async function runBotCycle4H() {
 
       if (!tradeCheck.canTrade) {
         log.info(`${signal.asset}: LONG signal filtered - ${tradeCheck.reason}`);
+
+        // Emit signal rejected event
+        const rejectMarket = JournalEmitter.createMarketContext({
+          price: signal.price,
+          indicator: signal.mfi,
+          indicatorName: 'MFI',
+          atr: signal.atr,
+          candleTime: signal.timestamp,
+          buyLevel: config.mfiBuyLevel,
+          sellLevel: config.mfiSellLevel,
+        });
+        journal.signalRejected(signal.asset, rejectMarket, {
+          signalType: 'LONG',
+          reason: tradeCheck.reason || 'Unknown',
+        });
         continue;
       }
 
@@ -309,6 +435,7 @@ async function runBotCycle4H() {
           assetPos.openLegs = [...assetPos.openLegs, ...newLegs];
           recordAssetTrade(state, signal.asset, signal.timestamp);
           log.info(`${signal.asset}: Position opened successfully`);
+          positionsOpened++;
 
           // Log to CSV
           const totalUSDC = newLegs.reduce((sum, leg) => sum + (leg.entryPrice * leg.quantity), 0);
@@ -330,9 +457,46 @@ async function runBotCycle4H() {
             trailingStop: newLegs[0].trailingStop || 0,
             mode: config.paperMode ? 'PAPER' : 'LIVE',
           });
+
+          // Emit position opened event
+          const openMarket = JournalEmitter.createMarketContext({
+            price: signal.price,
+            indicator: signal.mfi,
+            indicatorName: 'MFI',
+            atr: signal.atr,
+            candleTime: signal.timestamp,
+            buyLevel: config.mfiBuyLevel,
+            sellLevel: config.mfiSellLevel,
+          });
+          journal.positionOpened(signal.asset, openMarket, {
+            legIds: newLegs.map(l => l.id),
+            entryPrice: signal.price,
+            fillPrice: newLegs[0].entryPrice,
+            slippageUsdc: (newLegs[0].entryPrice - signal.price) * totalQty,
+            totalUsdc: totalUSDC,
+            totalQuantity: totalQty,
+            tpTarget: newLegs[0].targetPrice || 0,
+            breakevenLock: signal.price + signal.atr * config.breakEvenLockMultiplier,
+            atrUsed: signal.atr,
+          }, newLegs[0].id);
         }
       } else {
         log.warn(`${signal.asset}: Failed to open position (insufficient balance?)`);
+
+        // Emit trade failed event
+        const failMarket = JournalEmitter.createMarketContext({
+          price: signal.price,
+          indicator: signal.mfi,
+          indicatorName: 'MFI',
+          atr: signal.atr,
+          candleTime: signal.timestamp,
+          buyLevel: config.mfiBuyLevel,
+          sellLevel: config.mfiSellLevel,
+        });
+        journal.tradeFailed(signal.asset, failMarket, {
+          reason: 'Insufficient balance',
+          signalType: 'LONG',
+        });
       }
     }
 
@@ -374,6 +538,35 @@ async function runBotCycle4H() {
         );
         csvLogger.logPositionLegClosures(trimmedRunners, signal.asset, config.paperMode ? 'PAPER' : 'LIVE');
 
+        // Emit runner trimmed events
+        const trimMarket = JournalEmitter.createMarketContext({
+          price: signal.price,
+          indicator: signal.mfi,
+          indicatorName: 'MFI',
+          atr: signal.atr,
+          candleTime: signal.timestamp,
+          buyLevel: config.mfiBuyLevel,
+          sellLevel: config.mfiSellLevel,
+        });
+        for (const leg of trimmedRunners) {
+          const pnlUsdc = leg.closePrice ? (leg.closePrice - leg.entryPrice) * leg.quantity : 0;
+          const pnlPercent = leg.closePrice ? ((leg.closePrice - leg.entryPrice) / leg.entryPrice) * 100 : 0;
+          const holdingPeriodMs = leg.closeTime ? leg.closeTime - leg.entryTime : 0;
+
+          journal.runnerTrimmed(signal.asset, trimMarket, {
+            legId: leg.id,
+            entryPrice: leg.entryPrice,
+            exitPrice: leg.closePrice || signal.price,
+            quantity: leg.quantity,
+            pnlUsdc,
+            pnlPercent,
+            holdingPeriodMs,
+            triggerIndicator: signal.mfi,
+            triggerLevel: config.mfiSellLevel,
+          }, leg.id);
+          runnersTrimmed++;
+        }
+
         updateAssetPositions(state, signal.asset, updatedLegs);
 
         const runnersAfter = updatedLegs.filter(l => l.type === 'RUNNER' && l.status === 'OPEN').length;
@@ -395,6 +588,26 @@ async function runBotCycle4H() {
   // Save state
   state.lastProcessedCandleTime = Date.now();
   saveState(state);
+
+  // Emit cycle end event
+  const cycleEndMarket = JournalEmitter.createMarketContext({
+    price: 0,
+    indicator: 0,
+    indicatorName: 'MFI',
+    atr: 0,
+    candleTime: Date.now(),
+    buyLevel: config.mfiBuyLevel,
+    sellLevel: config.mfiSellLevel,
+  });
+  journal.cycleEnd(cycleEndMarket, {
+    assetsProcessed: assets.length,
+    signalsGenerated: signals.length,
+    positionsOpened,
+    positionsClosed,
+    runnersTrimmed,
+    cycleDurationMs: Date.now() - cycleStartTime,
+  });
+  journal.endCycle();
 
   log.info('\n4H bot cycle complete\n');
 }

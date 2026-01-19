@@ -6,6 +6,9 @@ const state = {
   bots: [],
   status: {},
   selectedBot: null,
+  timelineEvents: [],
+  timelineOffset: 0,
+  timelineHasMore: true,
 };
 
 const botGrid = document.getElementById("bot-grid");
@@ -383,5 +386,236 @@ function formatLogLines(lines) {
   }).join("");
 }
 
+// ============================================================================
+// Timeline functionality
+// ============================================================================
+
+const timelineFeed = document.getElementById("timeline-feed");
+const timelineBotFilter = document.getElementById("timeline-bot-filter");
+const timelineAssetFilter = document.getElementById("timeline-asset-filter");
+const timelineTypeFilter = document.getElementById("timeline-type-filter");
+const timelineLoadMore = document.getElementById("timeline-load-more");
+const timelineRefreshBtn = document.getElementById("timeline-refresh-btn");
+
+const EVENT_ICONS = {
+  CYCLE_START: "🔄",
+  CYCLE_END: "✓",
+  SIGNAL_GENERATED: "📊",
+  SIGNAL_REJECTED: "🚫",
+  NO_SIGNAL: "•",
+  POSITION_OPENED: "📈",
+  TP_HIT: "🎯",
+  TRAILING_STOP_UPDATED: "↑",
+  TRAILING_STOP_HIT: "🛑",
+  RUNNER_TRIMMED: "✂️",
+  TRADE_FAILED: "⚠️",
+  ERROR: "❌",
+};
+
+const EVENT_CATEGORIES = {
+  CYCLE_START: "cycle",
+  CYCLE_END: "cycle",
+  SIGNAL_GENERATED: "signal",
+  SIGNAL_REJECTED: "signal",
+  NO_SIGNAL: "signal",
+  POSITION_OPENED: "position",
+  TP_HIT: "position",
+  TRAILING_STOP_UPDATED: "position",
+  TRAILING_STOP_HIT: "position",
+  RUNNER_TRIMMED: "position",
+  TRADE_FAILED: "error",
+  ERROR: "error",
+};
+
+async function loadTimeline(reset = false) {
+  if (reset) {
+    state.timelineOffset = 0;
+    state.timelineEvents = [];
+    state.timelineHasMore = true;
+    timelineFeed.innerHTML = '<div class="timeline-loading">Loading events...</div>';
+  }
+
+  const botId = timelineBotFilter.value;
+  const asset = timelineAssetFilter.value;
+  const types = timelineTypeFilter.value;
+
+  let url = `/api/timeline?limit=30&offset=${state.timelineOffset}`;
+  if (botId) url += `&botId=${encodeURIComponent(botId)}`;
+  if (asset) url += `&asset=${encodeURIComponent(asset)}`;
+  if (types) url += `&types=${encodeURIComponent(types)}`;
+
+  try {
+    const response = await apiFetch(url);
+    if (!response.ok) throw new Error("Failed to load timeline");
+
+    const data = await response.json();
+    const events = data.events || [];
+
+    if (reset) {
+      state.timelineEvents = events;
+    } else {
+      state.timelineEvents = [...state.timelineEvents, ...events];
+    }
+
+    state.timelineHasMore = data.hasMore;
+    state.timelineOffset += events.length;
+
+    renderTimeline();
+  } catch (error) {
+    timelineFeed.innerHTML = `<div class="timeline-empty">Failed to load timeline: ${error.message}</div>`;
+  }
+}
+
+function renderTimeline() {
+  if (state.timelineEvents.length === 0) {
+    timelineFeed.innerHTML = '<div class="timeline-empty">No events yet. Run a bot to generate activity.</div>';
+    timelineLoadMore.disabled = true;
+    return;
+  }
+
+  const eventsHtml = state.timelineEvents.map(renderTimelineEvent).join("");
+  timelineFeed.innerHTML = eventsHtml;
+  timelineLoadMore.disabled = !state.timelineHasMore;
+}
+
+function renderTimelineEvent(event) {
+  const icon = EVENT_ICONS[event.type] || "•";
+  const category = EVENT_CATEGORIES[event.type] || "cycle";
+  const time = formatEventTime(event.timestamp);
+  const content = formatEventContent(event);
+  const context = formatEventContext(event);
+
+  const typeLabel = event.type.replace(/_/g, " ");
+
+  return `
+    <div class="timeline-event ${category}">
+      <div class="timeline-time">
+        ${time}
+      </div>
+      <div>
+        <div class="timeline-header">
+          <span class="timeline-icon">${icon}</span>
+          <span class="timeline-asset">${event.asset === "*" ? "All" : event.asset}</span>
+          <span class="timeline-type">${typeLabel}</span>
+        </div>
+        <div class="timeline-content">${content}</div>
+        <div class="timeline-context">${context}</div>
+      </div>
+    </div>
+  `;
+}
+
+function formatEventTime(timestamp) {
+  const date = new Date(timestamp);
+  const today = new Date();
+  const isToday = date.toDateString() === today.toDateString();
+
+  const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  if (isToday) {
+    return timeStr;
+  }
+
+  const dateStr = date.toLocaleDateString([], { month: "short", day: "numeric" });
+  return `${dateStr}<br>${timeStr}`;
+}
+
+function formatEventContent(event) {
+  const p = event.payload || {};
+
+  switch (event.type) {
+    case "CYCLE_START":
+      return `Processing ${p.assetsToProcess?.join(", ") || "assets"} with ${p.totalOpenPositions || 0} open positions`;
+
+    case "CYCLE_END":
+      return `Processed ${p.assetsProcessed || 0} assets, ${p.signalsGenerated || 0} signals, ${p.positionsOpened || 0} opened, ${p.runnersTrimmed || 0} trimmed (${(p.cycleDurationMs / 1000).toFixed(1)}s)`;
+
+    case "SIGNAL_GENERATED":
+      return `${p.signalType} signal: MFI crossed ${p.crossDirection === "UP" ? "above" : "below"} ${p.signalType === "LONG" ? p.buyLevel : p.sellLevel} (${p.previousIndicator?.toFixed(1)} → ${p.currentIndicator?.toFixed(1)})`;
+
+    case "SIGNAL_REJECTED":
+      return `${p.signalType} signal rejected: ${p.reason}`;
+
+    case "NO_SIGNAL":
+      return `${p.reason} (MFI: ${p.indicatorValue?.toFixed(1)})`;
+
+    case "POSITION_OPENED":
+      return `Opened ${p.legIds?.length || 2} legs at $${p.fillPrice?.toFixed(2)} | TP: $${p.tpTarget?.toFixed(2)} | Total: $${p.totalUsdc?.toFixed(2)}`;
+
+    case "TP_HIT":
+      return `Take profit hit! Entry: $${p.entryPrice?.toFixed(2)} → Exit: $${p.exitPrice?.toFixed(2)} | P&L: ${formatPnL(p.pnlUsdc)} (${p.pnlPercent?.toFixed(1)}%)`;
+
+    case "TRAILING_STOP_UPDATED":
+      return `Trailing stop ${p.reason === "ACTIVATED" ? "activated" : "moved"}: $${p.previousStop?.toFixed(2) || "--"} → $${p.newStop?.toFixed(2)} (high: $${p.newHighest?.toFixed(2)})`;
+
+    case "TRAILING_STOP_HIT":
+      return `Trailing stop hit! Entry: $${p.entryPrice?.toFixed(2)} → Exit: $${p.exitPrice?.toFixed(2)} (high: $${p.highestReached?.toFixed(2)}) | P&L: ${formatPnL(p.pnlUsdc)} (${p.pnlPercent?.toFixed(1)}%)`;
+
+    case "RUNNER_TRIMMED":
+      return `Runner trimmed on MFI ${p.triggerIndicator?.toFixed(1)} > ${p.triggerLevel} | Entry: $${p.entryPrice?.toFixed(2)} → Exit: $${p.exitPrice?.toFixed(2)} | P&L: ${formatPnL(p.pnlUsdc)}`;
+
+    case "TRADE_FAILED":
+      return `${p.signalType} trade failed: ${p.reason}${p.requiredUsdc ? ` (needed $${p.requiredUsdc}, had $${p.availableUsdc})` : ""}`;
+
+    case "ERROR":
+      return `Error in ${p.context || "bot"}: ${p.message}`;
+
+    default:
+      return JSON.stringify(p);
+  }
+}
+
+function formatEventContext(event) {
+  const m = event.market;
+  if (!m || !m.price) return `${event.botId} | ${event.mode}`;
+
+  const parts = [
+    `$${m.price.toFixed(2)}`,
+    `${m.indicatorName} ${m.indicator.toFixed(1)}`,
+    m.trend,
+    `ATR ${m.atrPercent?.toFixed(1)}%`,
+  ];
+
+  return `${parts.join(" | ")} | ${event.botId} | ${event.mode}`;
+}
+
+async function loadTimelineFilters() {
+  try {
+    const response = await apiFetch("/api/timeline/filters");
+    if (!response.ok) return;
+
+    const data = await response.json();
+    const filters = data.filters || {};
+
+    // Populate bot filter
+    if (filters.botIds?.length) {
+      const options = filters.botIds.map(id => `<option value="${id}">${id}</option>`).join("");
+      timelineBotFilter.innerHTML = `<option value="">All Bots</option>${options}`;
+    }
+
+    // Populate asset filter
+    if (filters.assets?.length) {
+      const options = filters.assets.filter(a => a !== "*").map(a => `<option value="${a}">${a}</option>`).join("");
+      timelineAssetFilter.innerHTML = `<option value="">All Assets</option>${options}`;
+    }
+  } catch (error) {
+    console.error("Failed to load timeline filters:", error);
+  }
+}
+
+// Timeline event listeners
+timelineRefreshBtn.addEventListener("click", () => loadTimeline(true));
+timelineBotFilter.addEventListener("change", () => loadTimeline(true));
+timelineAssetFilter.addEventListener("change", () => loadTimeline(true));
+timelineTypeFilter.addEventListener("change", () => loadTimeline(true));
+timelineLoadMore.addEventListener("click", () => loadTimeline(false));
+
+// ============================================================================
+// Initialize
+// ============================================================================
+
 refreshAll();
+loadTimelineFilters();
+loadTimeline(true);
 setInterval(refreshAll, 30000);
+setInterval(() => loadTimeline(true), 60000);

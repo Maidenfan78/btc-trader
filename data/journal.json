@@ -1,0 +1,46 @@
+{
+  "entries": [],
+  "tags": [
+    {
+      "id": "mfi-signal",
+      "name": "MFI Signal",
+      "color": "#4CAF50"
+    },
+    {
+      "id": "trend-follow",
+      "name": "Trend Follow",
+      "color": "#2196F3"
+    },
+    {
+      "id": "breakout",
+      "name": "Breakout",
+      "color": "#FF9800"
+    },
+    {
+      "id": "reversal",
+      "name": "Reversal",
+      "color": "#9C27B0"
+    },
+    {
+      "id": "tp-hit",
+      "name": "TP Hit",
+      "color": "#00BCD4"
+    },
+    {
+      "id": "stopped-out",
+      "name": "Stopped Out",
+      "color": "#F44336"
+    },
+    {
+      "id": "manual-close",
+      "name": "Manual Close",
+      "color": "#607D8B"
+    },
+    {
+      "id": "learning",
+      "name": "Learning",
+      "color": "#FFEB3B"
+    }
+  ],
+  "version": 1
+}

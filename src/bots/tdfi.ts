@@ -29,8 +29,8 @@ import {
   BinanceInterval,
   MultiAssetManagerConfig,
 } from 'trading-bot-platform';
-import { loadTDFIConfig, getTDFILogger } from '../config/tdfi';
-import { getAssets } from '../config/assets';
+import { loadTDFIConfig, getTDFILogger } from '../config/tdfi.js';
+import { getAssets } from '../config/assets.js';
 
 const STATE_FILE = process.env.BOT_STATE_FILE || 'state-tdfi.json';
 const TIMEFRAME = (process.env.BOT_TIMEFRAME || '4h').toLowerCase() === 'd1'

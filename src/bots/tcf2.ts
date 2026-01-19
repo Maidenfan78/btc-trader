@@ -29,8 +29,8 @@ import {
   BinanceInterval,
   MultiAssetManagerConfig,
 } from 'trading-bot-platform';
-import { loadTCF2Config, getTCF2Logger } from '../config/tcf2';
-import { getAssets } from '../config/assets';
+import { loadTCF2Config, getTCF2Logger } from '../config/tcf2.js';
+import { getAssets } from '../config/assets.js';
 
 const STATE_FILE = process.env.BOT_STATE_FILE || 'state-tcf2.json';
 const TIMEFRAME = (process.env.BOT_TIMEFRAME || '4h').toLowerCase() === 'd1'

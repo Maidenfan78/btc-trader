@@ -5,7 +5,7 @@
  * with configurable offset to avoid high volatility at candle close.
  */
 
-import { MFIDailyConfig } from '../config/types';
+import { MFIDailyConfig } from '../config/types.js';
 import { createLogger, Logger } from 'trading-bot-platform';
 
 let logger: Logger;

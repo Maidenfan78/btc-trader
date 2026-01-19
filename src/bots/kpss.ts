@@ -29,8 +29,8 @@ import {
   BinanceInterval,
   MultiAssetManagerConfig,
 } from 'trading-bot-platform';
-import { loadKPSSConfig, getKPSSLogger } from '../config/kpss';
-import { getAssets } from '../config/assets';
+import { loadKPSSConfig, getKPSSLogger } from '../config/kpss.js';
+import { getAssets } from '../config/assets.js';
 
 const STATE_FILE = process.env.BOT_STATE_FILE || 'state-kpss.json';
 const TIMEFRAME = (process.env.BOT_TIMEFRAME || '4h').toLowerCase() === 'd1'

@@ -24,7 +24,7 @@ import {
   BotState,
   Logger,
 } from 'trading-bot-platform';
-import { loadMFIDailyConfig } from '../config/mfi-daily';
+import { loadMFIDailyConfig } from '../config/mfi-daily.js';
 
 const STATE_FILE = process.env.BOT_STATE_FILE || 'state.json';
 

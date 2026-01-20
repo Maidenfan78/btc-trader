@@ -125,6 +125,7 @@ node dist/dashboard.js
 ### Dashboard UI
 
 The UI is a lightweight web app served by `ui-server` on port 5173.
+Use the theme toggle in the top-right to switch between light and dark mode (preference is saved).
 
 ```bash
 node dist/ui-server.js

@@ -34,6 +34,7 @@ import {
 import { loadKPSSConfig, getKPSSLogger } from '../config/kpss.js';
 import { getAllAssets, getAssetsBySymbols } from '../config/assets.js';
 import { getBotEnabledAssets } from '../config/bots.js';
+import { hydrateMultiAssetState } from '../config/state.js';
 
 const BOT_ID = 'kpss';
 const INDICATOR_NAME = 'KPSS';
@@ -54,7 +55,7 @@ function loadState(assets: AssetConfig[]): MultiAssetBotState {
       const data = fs.readFileSync(STATE_FILE, 'utf-8');
       const state = JSON.parse(data);
       log.info('Loaded existing KPSS bot state from disk');
-      return state;
+      return hydrateMultiAssetState(assets, state);
     } catch {
       log.warn('Failed to load state file, initializing fresh state');
       return initializeMultiAssetState(assets);

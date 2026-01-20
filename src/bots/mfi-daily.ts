@@ -41,6 +41,7 @@ import {
 import { loadMFIDailyConfig } from '../config/mfi-daily.js';
 import { getAllAssets, getAssetsBySymbols } from '../config/assets.js';
 import { getBotEnabledAssets } from '../config/bots.js';
+import { hydrateMultiAssetState } from '../config/state.js';
 
 const BOT_ID = 'btc-daily';
 const INDICATOR_NAME = 'MFI';
@@ -105,7 +106,7 @@ function loadState(assets: AssetConfig[]): MultiAssetBotState {
       const data = fs.readFileSync(STATE_FILE, 'utf-8');
       const state = JSON.parse(data);
       log.info('Loaded existing daily bot state from disk');
-      return state;
+      return hydrateMultiAssetState(assets, state);
     } catch {
       log.warn('Failed to load state file, initializing fresh state');
       return initializeMultiAssetState(assets);

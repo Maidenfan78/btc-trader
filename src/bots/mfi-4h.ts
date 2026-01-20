@@ -35,6 +35,7 @@ import {
 import { loadMFI4HConfig, getMFI4HLogger } from '../config/mfi-4h.js';
 import { getAllAssets, getAssetsBySymbols } from '../config/assets.js';
 import { getBotEnabledAssets } from '../config/bots.js';
+import { hydrateMultiAssetState } from '../config/state.js';
 
 const STATE_FILE = process.env.BOT_STATE_FILE || 'state-4h.json';
 
@@ -45,7 +46,7 @@ function loadState(assets: AssetConfig[]): MultiAssetBotState {
       const data = fs.readFileSync(STATE_FILE, 'utf-8');
       const state = JSON.parse(data);
       log.info('Loaded existing 4H bot state from disk');
-      return state;
+      return hydrateMultiAssetState(assets, state);
     } catch {
       log.warn('Failed to load state file, initializing fresh state');
       return initializeMultiAssetState(assets);

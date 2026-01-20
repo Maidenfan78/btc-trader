@@ -34,12 +34,16 @@ import {
   AssetConfig,
   MultiAssetManagerConfig,
   Logger,
+  EventStore,
+  JournalEmitter,
+  MarketContext,
 } from 'trading-bot-platform';
 import { loadMFIDailyConfig } from '../config/mfi-daily.js';
 import { getAllAssets, getAssetsBySymbols } from '../config/assets.js';
 import { getBotEnabledAssets } from '../config/bots.js';
 
 const BOT_ID = 'btc-daily';
+const INDICATOR_NAME = 'MFI';
 const STATE_FILE = process.env.BOT_STATE_FILE || 'state.json';
 
 let logger: Logger;
@@ -71,6 +75,28 @@ interface IndicatorSnapshot {
 }
 
 let indicatorSnapshot: IndicatorSnapshot = {};
+
+// Initialize event store and journal emitter
+const dataDir = process.env.BOT_DATA_DIR || 'data';
+if (!fs.existsSync(dataDir)) {
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+  } catch (err) {
+    const log = getLogger();
+    log.error(`Failed to create data directory: ${dataDir}`, err);
+    throw new Error(`Cannot create data directory: ${dataDir}`);
+  }
+}
+
+const eventStore = new EventStore({ dataDir });
+
+function createJournalEmitter(config: ReturnType<typeof loadMFIDailyConfig>): JournalEmitter {
+  return new JournalEmitter({
+    botId: BOT_ID,
+    mode: config.paperMode ? 'PAPER' : 'LIVE',
+    eventStore,
+  });
+}
 
 function loadState(assets: AssetConfig[]): MultiAssetBotState {
   const log = getLogger();
@@ -112,7 +138,8 @@ async function processAsset(
   config: ReturnType<typeof loadMFIDailyConfig>,
   broker: PaperBroker | LiveBroker,
   csvLogger: ReturnType<typeof createTradingCSVLogger>,
-  circuitBreaker: CircuitBreaker
+  circuitBreaker: CircuitBreaker,
+  journal: JournalEmitter
 ): Promise<AssetSignal | null> {
   const log = getLogger();
 
@@ -142,6 +169,16 @@ async function processAsset(
   }
 
   log.info(`${asset.symbol} - Price: $${latestCandle.close.toFixed(2)}, MFI: ${currentMFI.toFixed(2)}, ATR: $${currentATR.toFixed(2)}`);
+
+  const marketContext = JournalEmitter.createMarketContext({
+    price: latestCandle.close,
+    indicator: currentMFI,
+    indicatorName: INDICATOR_NAME,
+    atr: currentATR,
+    candleTime: latestCandle.timestamp,
+    buyLevel: config.mfiBuyLevel,
+    sellLevel: config.mfiSellLevel,
+  });
 
   // Update indicator snapshot for dashboard
   const trend = currentMFI <= config.mfiBuyLevel ? 'BULLISH' :
@@ -195,6 +232,16 @@ async function processAsset(
   if (isValidSignal(signal)) {
     log.info(`${asset.symbol}: Signal detected - ${signal.type}, MFI ${previousMFI.toFixed(2)} -> ${currentMFI.toFixed(2)}`);
 
+    const signalType = signal.type === 'LONG' ? 'LONG' : 'SHORT';
+    journal.signalGenerated(asset.symbol, marketContext, {
+      signalType,
+      previousIndicator: previousMFI,
+      currentIndicator: currentMFI,
+      buyLevel: config.mfiBuyLevel,
+      sellLevel: config.mfiSellLevel,
+      crossDirection: signalType === 'LONG' ? 'UP' : 'DOWN',
+    });
+
     return {
       type: signal.type,
       asset: asset.symbol,
@@ -204,6 +251,13 @@ async function processAsset(
       timestamp: latestCandle.timestamp,
     };
   }
+
+  journal.noSignal(asset.symbol, marketContext, {
+    indicatorValue: currentMFI,
+    buyLevel: config.mfiBuyLevel,
+    sellLevel: config.mfiSellLevel,
+    reason: 'No crossover',
+  });
 
   log.info(`${asset.symbol}: No signal (MFI: ${currentMFI.toFixed(2)})`);
   return null;
@@ -221,6 +275,9 @@ async function runBotCycle() {
 
     // Load config
     const config = loadMFIDailyConfig();
+    const cycleStartTime = Date.now();
+    const journal = createJournalEmitter(config);
+    journal.startCycle();
     log.info(`Mode: ${config.paperMode ? 'PAPER' : 'LIVE'}`);
     log.info(`Trading: ${config.liveTradingEnabled ? 'ENABLED' : 'DISABLED'}`);
 
@@ -243,6 +300,21 @@ async function runBotCycle() {
     // Load state
     const state = loadState(allAssets);
     log.info('State loaded', {
+      totalOpenPositions: getTotalOpenPositions(state),
+    });
+
+    const cycleStartMarket = JournalEmitter.createMarketContext({
+      price: 0,
+      indicator: 0,
+      indicatorName: INDICATOR_NAME,
+      atr: 0,
+      candleTime: Date.now(),
+      buyLevel: config.mfiBuyLevel,
+      sellLevel: config.mfiSellLevel,
+    });
+
+    journal.cycleStart(cycleStartMarket, {
+      assetsToProcess: assets.map(a => a.symbol),
       totalOpenPositions: getTotalOpenPositions(state),
     });
 
@@ -326,12 +398,17 @@ async function runBotCycle() {
     const signals: AssetSignal[] = [];
     for (const asset of assets) {
       try {
-        const signal = await processAsset(asset, state, config, broker, csvLogger, circuitBreaker);
+        const signal = await processAsset(asset, state, config, broker, csvLogger, circuitBreaker, journal);
         if (signal) {
           signals.push(signal);
         }
       } catch (error) {
         log.error(`Error processing ${asset.symbol}:`, error);
+        journal.error(asset.symbol, cycleStartMarket, {
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          context: 'processAsset',
+        });
       }
     }
 
@@ -371,6 +448,19 @@ async function runBotCycle() {
 
         if (!tradeCheck.canTrade) {
           log.info(`${signal.asset}: LONG signal filtered - ${tradeCheck.reason}`);
+          const rejectMarket = JournalEmitter.createMarketContext({
+            price: signal.price,
+            indicator: signal.mfi,
+            indicatorName: INDICATOR_NAME,
+            atr: signal.atr,
+            candleTime: signal.timestamp,
+            buyLevel: config.mfiBuyLevel,
+            sellLevel: config.mfiSellLevel,
+          });
+          journal.signalRejected(signal.asset, rejectMarket, {
+            signalType: 'LONG',
+            reason: tradeCheck.reason || 'Trade filtered',
+          });
           continue;
         }
 
@@ -433,6 +523,19 @@ async function runBotCycle() {
           }
         } else {
           log.error(`${signal.asset}: Failed to open position`);
+          const failMarket = JournalEmitter.createMarketContext({
+            price: signal.price,
+            indicator: signal.mfi,
+            indicatorName: INDICATOR_NAME,
+            atr: signal.atr,
+            candleTime: signal.timestamp,
+            buyLevel: config.mfiBuyLevel,
+            sellLevel: config.mfiSellLevel,
+          });
+          journal.tradeFailed(signal.asset, failMarket, {
+            signalType: 'LONG',
+            reason: 'Failed to open position',
+          });
         }
       }
 
@@ -486,6 +589,26 @@ async function runBotCycle() {
     state.lastProcessedCandleTime = Date.now();
     saveState(state);
     log.info('State saved');
+
+    const cycleEndMarket = JournalEmitter.createMarketContext({
+      price: 0,
+      indicator: 0,
+      indicatorName: INDICATOR_NAME,
+      atr: 0,
+      candleTime: Date.now(),
+      buyLevel: config.mfiBuyLevel,
+      sellLevel: config.mfiSellLevel,
+    });
+
+    journal.cycleEnd(cycleEndMarket, {
+      assetsProcessed: assets.length,
+      signalsGenerated: signals.length,
+      positionsOpened: 0,
+      positionsClosed: 0,
+      runnersTrimmed: 0,
+      cycleDurationMs: Date.now() - cycleStartTime,
+    });
+    journal.endCycle();
 
     // Final summary
     log.info(circuitBreaker.getSummary());

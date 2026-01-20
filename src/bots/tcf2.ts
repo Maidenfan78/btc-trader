@@ -27,10 +27,16 @@ import {
   AssetConfig,
   BinanceInterval,
   MultiAssetManagerConfig,
+  EventStore,
+  JournalEmitter,
+  MarketContext,
 } from 'trading-bot-platform';
 import { loadTCF2Config, getTCF2Logger } from '../config/tcf2.js';
 import { getAllAssets, getAssetsBySymbols } from '../config/assets.js';
 import { getBotEnabledAssets } from '../config/bots.js';
+
+const BOT_ID = 'tcf2';
+const INDICATOR_NAME = 'TCF2';
 
 const STATE_FILE = process.env.BOT_STATE_FILE || 'state-tcf2.json';
 const TIMEFRAME = (process.env.BOT_TIMEFRAME || '4h').toLowerCase() === 'd1'
@@ -72,6 +78,28 @@ interface IndicatorSnapshot {
 
 let indicatorSnapshot: IndicatorSnapshot = {};
 
+// Initialize event store and journal emitter
+const dataDir = process.env.BOT_DATA_DIR || 'data';
+if (!fs.existsSync(dataDir)) {
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+  } catch (err) {
+    const log = getTCF2Logger();
+    log.error(`Failed to create data directory: ${dataDir}`, err);
+    throw new Error(`Cannot create data directory: ${dataDir}`);
+  }
+}
+
+const eventStore = new EventStore({ dataDir });
+
+function createJournalEmitter(config: ReturnType<typeof loadTCF2Config>): JournalEmitter {
+  return new JournalEmitter({
+    botId: BOT_ID,
+    mode: config.paperMode ? 'PAPER' : 'LIVE',
+    eventStore,
+  });
+}
+
 function saveState(state: MultiAssetBotState): void {
   const log = getTCF2Logger();
   try {
@@ -91,7 +119,8 @@ async function processAsset(
   state: MultiAssetBotState,
   config: ReturnType<typeof loadTCF2Config>,
   broker: PaperBroker,
-  csvLogger: ReturnType<typeof createTradingCSVLogger>
+  csvLogger: ReturnType<typeof createTradingCSVLogger>,
+  journal: JournalEmitter
 ): Promise<AssetSignal | null> {
   const log = getTCF2Logger();
 
@@ -125,6 +154,14 @@ async function processAsset(
 
   log.info(`${asset.symbol} - Price: $${currentCandle.close.toFixed(2)}, ATR: $${currentATR.toFixed(2)}`);
   log.info(`${asset.symbol} - TCF2 Line1: ${currentTCF2.line1.toFixed(4)}, Line2: ${currentTCF2.line2.toFixed(4)}`);
+
+  const marketContext = JournalEmitter.createMarketContext({
+    price: currentCandle.close,
+    indicator: currentTCF2.line1,
+    indicatorName: INDICATOR_NAME,
+    atr: currentATR,
+    candleTime: currentCandle.timestamp,
+  });
 
   // Update indicator snapshot for dashboard
   const indicatorTrend = currentTCF2.line1 > currentTCF2.line2 ? 'BULLISH' :
@@ -176,6 +213,19 @@ async function processAsset(
     log.info(`${asset.symbol}: Signal detected - ${tcf2Signal}, Trend: ${trend}`);
     log.info(`${asset.symbol}: TCF2 crossover: ${previousTCF2.line1.toFixed(4)}/${previousTCF2.line2.toFixed(4)} -> ${currentTCF2.line1.toFixed(4)}/${currentTCF2.line2.toFixed(4)}`);
 
+    journal.emit('SIGNAL_GENERATED', {
+      asset: asset.symbol,
+      market: marketContext,
+      payload: {
+        signalType: tcf2Signal,
+        indicatorName: INDICATOR_NAME,
+        previousIndicator: previousTCF2.line1,
+        currentIndicator: currentTCF2.line1,
+        indicator2: currentTCF2.line2,
+        message: `${tcf2Signal} signal: TCF2 L1 ${previousTCF2.line1.toFixed(4)} -> ${currentTCF2.line1.toFixed(4)} vs L2 ${currentTCF2.line2.toFixed(4)} (trend ${trend})`,
+      },
+    });
+
     return {
       type: tcf2Signal,
       asset: asset.symbol,
@@ -185,6 +235,17 @@ async function processAsset(
       timestamp: currentCandle.timestamp,
     };
   }
+
+  journal.emit('NO_SIGNAL', {
+    asset: asset.symbol,
+    market: marketContext,
+    payload: {
+      indicatorName: INDICATOR_NAME,
+      indicatorValue: currentTCF2.line1,
+      indicatorValue2: currentTCF2.line2,
+      message: `No signal (TCF2 L1 ${currentTCF2.line1.toFixed(4)} vs L2 ${currentTCF2.line2.toFixed(4)})`,
+    },
+  });
 
   log.info(`${asset.symbol}: No signal (Trend: ${trend}, L1: ${currentTCF2.line1.toFixed(4)}, L2: ${currentTCF2.line2.toFixed(4)})`);
   return null;
@@ -197,6 +258,9 @@ async function runBotCycleTCF2() {
   const assets = getAssetsBySymbols(enabledSymbols);
   const state = loadState(allAssets);
   const log = getTCF2Logger();
+  const cycleStartTime = Date.now();
+  const journal = createJournalEmitter(config);
+  journal.startCycle();
 
   // Create multi-asset manager config
   const managerConfig: MultiAssetManagerConfig = {
@@ -228,15 +292,33 @@ async function runBotCycleTCF2() {
   log.info(`Trading ${assets.length} assets: ${assets.map(a => a.symbol).join(', ')}`);
   log.info(`Total capital per full signal: $${getTotalCapitalPerSignal(allAssets)}`);
 
+  const cycleStartMarket = JournalEmitter.createMarketContext({
+    price: 0,
+    indicator: 0,
+    indicatorName: INDICATOR_NAME,
+    atr: 0,
+    candleTime: Date.now(),
+  });
+
+  journal.cycleStart(cycleStartMarket, {
+    assetsToProcess: assets.map(a => a.symbol),
+    totalOpenPositions: getTotalOpenPositions(state),
+  });
+
   const signals: AssetSignal[] = [];
   for (const asset of assets) {
     try {
-      const signal = await processAsset(asset, state, config, broker, csvLogger);
+      const signal = await processAsset(asset, state, config, broker, csvLogger, journal);
       if (signal) {
         signals.push(signal);
       }
     } catch (error) {
       log.error(`Error processing ${asset.symbol}:`, error);
+      journal.error(asset.symbol, cycleStartMarket, {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        context: 'processAsset',
+      });
     }
   }
 
@@ -267,6 +349,17 @@ async function runBotCycleTCF2() {
 
       if (!tradeCheck.canTrade) {
         log.info(`${signal.asset}: LONG signal filtered - ${tradeCheck.reason}`);
+        const rejectMarket = JournalEmitter.createMarketContext({
+          price: signal.price,
+          indicator: signal.mfi,
+          indicatorName: INDICATOR_NAME,
+          atr: signal.atr,
+          candleTime: signal.timestamp,
+        });
+        journal.signalRejected(signal.asset, rejectMarket, {
+          signalType: 'LONG',
+          reason: tradeCheck.reason || 'Trade filtered',
+        });
         continue;
       }
 
@@ -326,6 +419,17 @@ async function runBotCycleTCF2() {
         }
       } else {
         log.warn(`${signal.asset}: Failed to open position (insufficient balance?)`);
+        const failMarket = JournalEmitter.createMarketContext({
+          price: signal.price,
+          indicator: signal.mfi,
+          indicatorName: INDICATOR_NAME,
+          atr: signal.atr,
+          candleTime: signal.timestamp,
+        });
+        journal.tradeFailed(signal.asset, failMarket, {
+          signalType: 'LONG',
+          reason: 'Failed to open position',
+        });
       }
     }
 
@@ -385,6 +489,24 @@ async function runBotCycleTCF2() {
 
   state.lastProcessedCandleTime = Date.now();
   saveState(state);
+
+  const cycleEndMarket = JournalEmitter.createMarketContext({
+    price: 0,
+    indicator: 0,
+    indicatorName: INDICATOR_NAME,
+    atr: 0,
+    candleTime: Date.now(),
+  });
+
+  journal.cycleEnd(cycleEndMarket, {
+    assetsProcessed: assets.length,
+    signalsGenerated: signals.length,
+    positionsOpened: 0,
+    positionsClosed: 0,
+    runnersTrimmed: 0,
+    cycleDurationMs: Date.now() - cycleStartTime,
+  });
+  journal.endCycle();
 
   log.info('\nTCF2 bot cycle complete\n');
 }

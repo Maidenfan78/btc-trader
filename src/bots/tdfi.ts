@@ -27,10 +27,16 @@ import {
   AssetConfig,
   BinanceInterval,
   MultiAssetManagerConfig,
+  EventStore,
+  JournalEmitter,
+  MarketContext,
 } from 'trading-bot-platform';
 import { loadTDFIConfig, getTDFILogger } from '../config/tdfi.js';
 import { getAllAssets, getAssetsBySymbols } from '../config/assets.js';
 import { getBotEnabledAssets } from '../config/bots.js';
+
+const BOT_ID = 'tdfi';
+const INDICATOR_NAME = 'TDFI';
 
 const STATE_FILE = process.env.BOT_STATE_FILE || 'state-tdfi.json';
 const TIMEFRAME = (process.env.BOT_TIMEFRAME || '4h').toLowerCase() === 'd1'
@@ -72,6 +78,28 @@ interface IndicatorSnapshot {
 
 let indicatorSnapshot: IndicatorSnapshot = {};
 
+// Initialize event store and journal emitter
+const dataDir = process.env.BOT_DATA_DIR || 'data';
+if (!fs.existsSync(dataDir)) {
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+  } catch (err) {
+    const log = getTDFILogger();
+    log.error(`Failed to create data directory: ${dataDir}`, err);
+    throw new Error(`Cannot create data directory: ${dataDir}`);
+  }
+}
+
+const eventStore = new EventStore({ dataDir });
+
+function createJournalEmitter(config: ReturnType<typeof loadTDFIConfig>): JournalEmitter {
+  return new JournalEmitter({
+    botId: BOT_ID,
+    mode: config.paperMode ? 'PAPER' : 'LIVE',
+    eventStore,
+  });
+}
+
 function saveState(state: MultiAssetBotState): void {
   const log = getTDFILogger();
   try {
@@ -91,7 +119,8 @@ async function processAsset(
   state: MultiAssetBotState,
   config: ReturnType<typeof loadTDFIConfig>,
   broker: PaperBroker,
-  csvLogger: ReturnType<typeof createTradingCSVLogger>
+  csvLogger: ReturnType<typeof createTradingCSVLogger>,
+  journal: JournalEmitter
 ): Promise<AssetSignal | null> {
   const log = getTDFILogger();
 
@@ -125,6 +154,14 @@ async function processAsset(
 
   log.info(`${asset.symbol} - Price: $${currentCandle.close.toFixed(2)}, ATR: $${currentATR.toFixed(2)}`);
   log.info(`${asset.symbol} - TDFI Value: ${currentTDFI.value.toFixed(4)}`);
+
+  const marketContext = JournalEmitter.createMarketContext({
+    price: currentCandle.close,
+    indicator: currentTDFI.value,
+    indicatorName: INDICATOR_NAME,
+    atr: currentATR,
+    candleTime: currentCandle.timestamp,
+  });
 
   // Update indicator snapshot for dashboard
   const indicatorTrend = currentTDFI.value > config.tdfiTrigger ? 'BULLISH' :
@@ -174,6 +211,19 @@ async function processAsset(
   if (tdfiSignal !== 'NONE') {
     log.info(`${asset.symbol}: Signal detected - ${tdfiSignal}, Trend: ${trend}`);
 
+    journal.emit('SIGNAL_GENERATED', {
+      asset: asset.symbol,
+      market: marketContext,
+      payload: {
+        signalType: tdfiSignal,
+        indicatorName: INDICATOR_NAME,
+        previousIndicator: previousTDFI.value,
+        currentIndicator: currentTDFI.value,
+        triggerLevel: config.tdfiTrigger,
+        message: `${tdfiSignal} signal: TDFI ${previousTDFI.value.toFixed(4)} -> ${currentTDFI.value.toFixed(4)} (trigger ${config.tdfiTrigger})`,
+      },
+    });
+
     return {
       type: tdfiSignal,
       asset: asset.symbol,
@@ -183,6 +233,17 @@ async function processAsset(
       timestamp: currentCandle.timestamp,
     };
   }
+
+  journal.emit('NO_SIGNAL', {
+    asset: asset.symbol,
+    market: marketContext,
+    payload: {
+      indicatorName: INDICATOR_NAME,
+      indicatorValue: currentTDFI.value,
+      triggerLevel: config.tdfiTrigger,
+      message: `No signal (TDFI ${currentTDFI.value.toFixed(4)}, trigger ${config.tdfiTrigger})`,
+    },
+  });
 
   log.info(`${asset.symbol}: No signal (TDFI: ${currentTDFI.value.toFixed(4)})`);
   return null;
@@ -195,6 +256,9 @@ async function runBotCycleTDFI() {
   const assets = getAssetsBySymbols(enabledSymbols);
   const state = loadState(allAssets);
   const log = getTDFILogger();
+  const cycleStartTime = Date.now();
+  const journal = createJournalEmitter(config);
+  journal.startCycle();
 
   // Create multi-asset manager config
   const managerConfig: MultiAssetManagerConfig = {
@@ -226,15 +290,33 @@ async function runBotCycleTDFI() {
   log.info(`Trading ${assets.length} assets: ${assets.map(a => a.symbol).join(', ')}`);
   log.info(`Total capital per full signal: $${getTotalCapitalPerSignal(allAssets)}`);
 
+  const cycleStartMarket = JournalEmitter.createMarketContext({
+    price: 0,
+    indicator: 0,
+    indicatorName: INDICATOR_NAME,
+    atr: 0,
+    candleTime: Date.now(),
+  });
+
+  journal.cycleStart(cycleStartMarket, {
+    assetsToProcess: assets.map(a => a.symbol),
+    totalOpenPositions: getTotalOpenPositions(state),
+  });
+
   const signals: AssetSignal[] = [];
   for (const asset of assets) {
     try {
-      const signal = await processAsset(asset, state, config, broker, csvLogger);
+      const signal = await processAsset(asset, state, config, broker, csvLogger, journal);
       if (signal) {
         signals.push(signal);
       }
     } catch (error) {
       log.error(`Error processing ${asset.symbol}:`, error);
+      journal.error(asset.symbol, cycleStartMarket, {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        context: 'processAsset',
+      });
     }
   }
 
@@ -265,6 +347,17 @@ async function runBotCycleTDFI() {
 
       if (!tradeCheck.canTrade) {
         log.info(`${signal.asset}: LONG signal filtered - ${tradeCheck.reason}`);
+        const rejectMarket = JournalEmitter.createMarketContext({
+          price: signal.price,
+          indicator: signal.mfi,
+          indicatorName: INDICATOR_NAME,
+          atr: signal.atr,
+          candleTime: signal.timestamp,
+        });
+        journal.signalRejected(signal.asset, rejectMarket, {
+          signalType: 'LONG',
+          reason: tradeCheck.reason || 'Trade filtered',
+        });
         continue;
       }
 
@@ -377,6 +470,24 @@ async function runBotCycleTDFI() {
 
   state.lastProcessedCandleTime = Date.now();
   saveState(state);
+
+  const cycleEndMarket = JournalEmitter.createMarketContext({
+    price: 0,
+    indicator: 0,
+    indicatorName: INDICATOR_NAME,
+    atr: 0,
+    candleTime: Date.now(),
+  });
+
+  journal.cycleEnd(cycleEndMarket, {
+    assetsProcessed: assets.length,
+    signalsGenerated: signals.length,
+    positionsOpened: 0,
+    positionsClosed: 0,
+    runnersTrimmed: 0,
+    cycleDurationMs: Date.now() - cycleStartTime,
+  });
+  journal.endCycle();
 
   log.info('\nTDFI bot cycle complete\n');
 }

@@ -27,10 +27,16 @@ import {
   AssetConfig,
   BinanceInterval,
   MultiAssetManagerConfig,
+  EventStore,
+  JournalEmitter,
+  MarketContext,
 } from 'trading-bot-platform';
 import { loadKPSSConfig, getKPSSLogger } from '../config/kpss.js';
 import { getAllAssets, getAssetsBySymbols } from '../config/assets.js';
 import { getBotEnabledAssets } from '../config/bots.js';
+
+const BOT_ID = 'kpss';
+const INDICATOR_NAME = 'KPSS';
 
 const STATE_FILE = process.env.BOT_STATE_FILE || 'state-kpss.json';
 const TIMEFRAME = (process.env.BOT_TIMEFRAME || '4h').toLowerCase() === 'd1'
@@ -72,6 +78,28 @@ interface IndicatorSnapshot {
 
 let indicatorSnapshot: IndicatorSnapshot = {};
 
+// Initialize event store and journal emitter
+const dataDir = process.env.BOT_DATA_DIR || 'data';
+if (!fs.existsSync(dataDir)) {
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+  } catch (err) {
+    const log = getKPSSLogger();
+    log.error(`Failed to create data directory: ${dataDir}`, err);
+    throw new Error(`Cannot create data directory: ${dataDir}`);
+  }
+}
+
+const eventStore = new EventStore({ dataDir });
+
+function createJournalEmitter(config: ReturnType<typeof loadKPSSConfig>): JournalEmitter {
+  return new JournalEmitter({
+    botId: BOT_ID,
+    mode: config.paperMode ? 'PAPER' : 'LIVE',
+    eventStore,
+  });
+}
+
 function saveState(state: MultiAssetBotState): void {
   const log = getKPSSLogger();
   try {
@@ -91,7 +119,8 @@ async function processAsset(
   state: MultiAssetBotState,
   config: ReturnType<typeof loadKPSSConfig>,
   broker: PaperBroker,
-  csvLogger: ReturnType<typeof createTradingCSVLogger>
+  csvLogger: ReturnType<typeof createTradingCSVLogger>,
+  journal: JournalEmitter
 ): Promise<AssetSignal | null> {
   const log = getKPSSLogger();
 
@@ -125,6 +154,14 @@ async function processAsset(
 
   log.info(`${asset.symbol} - Price: $${currentCandle.close.toFixed(2)}, ATR: $${currentATR.toFixed(2)}`);
   log.info(`${asset.symbol} - KPSS Value: ${currentKPSS.value.toFixed(2)}, Signal: ${currentKPSS.signal.toFixed(2)}`);
+
+  const marketContext = JournalEmitter.createMarketContext({
+    price: currentCandle.close,
+    indicator: currentKPSS.value,
+    indicatorName: INDICATOR_NAME,
+    atr: currentATR,
+    candleTime: currentCandle.timestamp,
+  });
 
   // Update indicator snapshot for dashboard
   const indicatorTrend = currentKPSS.value > currentKPSS.signal ? 'BULLISH' :
@@ -175,6 +212,19 @@ async function processAsset(
   if (kpssSignal !== 'NONE') {
     log.info(`${asset.symbol}: Signal detected - ${kpssSignal}, Trend: ${trend}`);
 
+    journal.emit('SIGNAL_GENERATED', {
+      asset: asset.symbol,
+      market: marketContext,
+      payload: {
+        signalType: kpssSignal,
+        indicatorName: INDICATOR_NAME,
+        previousIndicator: previousKPSS.value,
+        currentIndicator: currentKPSS.value,
+        indicator2: currentKPSS.signal,
+        message: `${kpssSignal} signal: KPSS ${previousKPSS.value.toFixed(2)} -> ${currentKPSS.value.toFixed(2)} (signal ${currentKPSS.signal.toFixed(2)}, trend ${trend})`,
+      },
+    });
+
     return {
       type: kpssSignal,
       asset: asset.symbol,
@@ -184,6 +234,17 @@ async function processAsset(
       timestamp: currentCandle.timestamp,
     };
   }
+
+  journal.emit('NO_SIGNAL', {
+    asset: asset.symbol,
+    market: marketContext,
+    payload: {
+      indicatorName: INDICATOR_NAME,
+      indicatorValue: currentKPSS.value,
+      indicatorValue2: currentKPSS.signal,
+      message: `No signal (KPSS ${currentKPSS.value.toFixed(2)} vs signal ${currentKPSS.signal.toFixed(2)})`,
+    },
+  });
 
   log.info(`${asset.symbol}: No signal (KPSS: ${currentKPSS.value.toFixed(2)})`);
   return null;
@@ -196,6 +257,9 @@ async function runBotCycleKPSS() {
   const assets = getAssetsBySymbols(enabledSymbols);
   const state = loadState(allAssets);
   const log = getKPSSLogger();
+  const cycleStartTime = Date.now();
+  const journal = createJournalEmitter(config);
+  journal.startCycle();
 
   // Create multi-asset manager config
   const managerConfig: MultiAssetManagerConfig = {
@@ -227,15 +291,33 @@ async function runBotCycleKPSS() {
   log.info(`Trading ${assets.length} assets: ${assets.map(a => a.symbol).join(', ')}`);
   log.info(`Total capital per full signal: $${getTotalCapitalPerSignal(allAssets)}`);
 
+  const cycleStartMarket = JournalEmitter.createMarketContext({
+    price: 0,
+    indicator: 0,
+    indicatorName: INDICATOR_NAME,
+    atr: 0,
+    candleTime: Date.now(),
+  });
+
+  journal.cycleStart(cycleStartMarket, {
+    assetsToProcess: assets.map(a => a.symbol),
+    totalOpenPositions: getTotalOpenPositions(state),
+  });
+
   const signals: AssetSignal[] = [];
   for (const asset of assets) {
     try {
-      const signal = await processAsset(asset, state, config, broker, csvLogger);
+      const signal = await processAsset(asset, state, config, broker, csvLogger, journal);
       if (signal) {
         signals.push(signal);
       }
     } catch (error) {
       log.error(`Error processing ${asset.symbol}:`, error);
+      journal.error(asset.symbol, cycleStartMarket, {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        context: 'processAsset',
+      });
     }
   }
 
@@ -266,6 +348,17 @@ async function runBotCycleKPSS() {
 
       if (!tradeCheck.canTrade) {
         log.info(`${signal.asset}: LONG signal filtered - ${tradeCheck.reason}`);
+        const rejectMarket = JournalEmitter.createMarketContext({
+          price: signal.price,
+          indicator: signal.mfi,
+          indicatorName: INDICATOR_NAME,
+          atr: signal.atr,
+          candleTime: signal.timestamp,
+        });
+        journal.signalRejected(signal.asset, rejectMarket, {
+          signalType: 'LONG',
+          reason: tradeCheck.reason || 'Trade filtered',
+        });
         continue;
       }
 
@@ -378,6 +471,24 @@ async function runBotCycleKPSS() {
 
   state.lastProcessedCandleTime = Date.now();
   saveState(state);
+
+  const cycleEndMarket = JournalEmitter.createMarketContext({
+    price: 0,
+    indicator: 0,
+    indicatorName: INDICATOR_NAME,
+    atr: 0,
+    candleTime: Date.now(),
+  });
+
+  journal.cycleEnd(cycleEndMarket, {
+    assetsProcessed: assets.length,
+    signalsGenerated: signals.length,
+    positionsOpened: 0,
+    positionsClosed: 0,
+    runnersTrimmed: 0,
+    cycleDurationMs: Date.now() - cycleStartTime,
+  });
+  journal.endCycle();
 
   log.info('\nKPSS bot cycle complete\n');
 }

@@ -523,6 +523,10 @@ function formatEventTime(timestamp) {
 function formatEventContent(event) {
   const p = event.payload || {};
 
+  if (typeof p.message === "string") {
+    return p.message;
+  }
+
   switch (event.type) {
     case "CYCLE_START":
       return `Processing ${p.assetsToProcess?.join(", ") || "assets"} with ${p.totalOpenPositions || 0} open positions`;

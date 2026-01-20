@@ -193,6 +193,10 @@ sudo systemctl start bot@4h-mfi
 sudo systemctl enable bot@4h-mfi
 ```
 
+Service names map to bot IDs in `bots.json`:
+`bot@btc-daily`, `bot@4h-mfi`, `bot@tcf2`, `bot@kpss`, `bot@tdfi`, `bot@dssmom`.
+Avoid legacy names like `bot@4h-tcf2` or `bot@1d-mfi`.
+
 Check status:
 
 ```bash

@@ -8,6 +8,36 @@
   --accent-2: #f07b3f;
   --danger: #c4473c;
   --shadow: 0 24px 60px rgba(28, 20, 10, 0.12);
+  --bg-grad: radial-gradient(circle at top, #fff6ea 0%, #f6f1ea 55%, #eae2d8 100%);
+  --orb-a: #f7c59f;
+  --orb-b: #9ad1c8;
+  --orb-c: #f0a6ca;
+  --card-solid: #fff;
+  --card-soft: rgba(255, 255, 255, 0.6);
+  --chip-bg: rgba(31, 122, 114, 0.12);
+  --icon-bg: rgba(31, 122, 114, 0.1);
+  --row-bg: rgba(250, 247, 243, 0.9);
+}
+
+[data-theme="dark"] {
+  --bg: #0e1114;
+  --ink: #e8e3db;
+  --muted: #9a9188;
+  --card: rgba(18, 22, 26, 0.92);
+  --stroke: rgba(232, 227, 219, 0.08);
+  --accent: #3fd1c7;
+  --accent-2: #f29a4a;
+  --danger: #ff6b5f;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  --bg-grad: radial-gradient(circle at top, #19202a 0%, #0e1114 60%, #0a0d10 100%);
+  --orb-a: #1d4b4a;
+  --orb-b: #2f2a3f;
+  --orb-c: #3a1f2b;
+  --card-solid: #151a1f;
+  --card-soft: rgba(18, 22, 26, 0.7);
+  --chip-bg: rgba(63, 209, 199, 0.12);
+  --icon-bg: rgba(63, 209, 199, 0.12);
+  --row-bg: rgba(20, 24, 28, 0.9);
 }
 
 * {
@@ -18,7 +48,7 @@ body {
   margin: 0;
   font-family: "Space Grotesk", sans-serif;
   color: var(--ink);
-  background: radial-gradient(circle at top, #fff6ea 0%, #f6f1ea 55%, #eae2d8 100%);
+  background: var(--bg-grad);
   min-height: 100vh;
   padding: 32px 40px 80px;
   position: relative;
@@ -36,7 +66,7 @@ body {
 .orb-a {
   width: 380px;
   height: 380px;
-  background: #f7c59f;
+  background: var(--orb-a);
   top: -120px;
   left: -80px;
 }
@@ -44,7 +74,7 @@ body {
 .orb-b {
   width: 420px;
   height: 420px;
-  background: #9ad1c8;
+  background: var(--orb-b);
   bottom: -160px;
   right: -120px;
 }
@@ -52,7 +82,7 @@ body {
 .orb-c {
   width: 260px;
   height: 260px;
-  background: #f0a6ca;
+  background: var(--orb-c);
   top: 35%;
   right: 20%;
 }
@@ -106,7 +136,7 @@ h1 {
 .status-pill {
   padding: 8px 12px;
   border-radius: 999px;
-  background: rgba(31, 122, 114, 0.12);
+  background: var(--chip-bg);
   color: var(--accent);
   font-size: 13px;
   font-weight: 600;
@@ -136,7 +166,8 @@ h1 {
   border: 1px solid var(--stroke);
   font-family: inherit;
   font-size: 13px;
-  background: #fff;
+  background: var(--card-solid);
+  color: var(--ink);
   cursor: pointer;
 }
 
@@ -165,13 +196,13 @@ h1 {
   padding: 14px 16px;
   border-left: 3px solid var(--stroke);
   margin-bottom: 8px;
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--card-soft);
   border-radius: 0 14px 14px 0;
   transition: background 200ms ease;
 }
 
 .timeline-event:hover {
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--card);
 }
 
 .timeline-event.signal {
@@ -211,7 +242,7 @@ h1 {
   display: grid;
   place-items: center;
   font-size: 14px;
-  background: rgba(31, 122, 114, 0.1);
+  background: var(--icon-bg);
 }
 
 .timeline-event.signal .timeline-icon {
@@ -312,7 +343,7 @@ h2 {
 }
 
 .metric {
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--card-solid);
   border-radius: 14px;
   padding: 12px 14px;
   border: 1px solid var(--stroke);
@@ -337,7 +368,7 @@ h2 {
 .bot-card {
   padding: 14px;
   border-radius: 16px;
-  background: #fff;
+  background: var(--card-solid);
   border: 1px solid var(--stroke);
   transition: transform 200ms ease, box-shadow 200ms ease;
   cursor: pointer;
@@ -419,7 +450,7 @@ h2 {
 }
 
 .card {
-  background: #fff;
+  background: var(--card-solid);
   border-radius: 18px;
   border: 1px solid var(--stroke);
   padding: 16px;
@@ -442,7 +473,7 @@ h2 {
   gap: 10px;
   padding: 8px 10px;
   border-radius: 12px;
-  background: rgba(250, 247, 243, 0.9);
+  background: var(--row-bg);
 }
 
 .table-row.header {
@@ -500,6 +531,8 @@ h2 {
   border: 1px solid var(--stroke);
   margin-top: 6px;
   font-family: inherit;
+  background: var(--card-solid);
+  color: var(--ink);
 }
 
 .auth button {
@@ -540,6 +573,7 @@ button:hover {
 .ghost {
   background: transparent;
   border: 1px solid var(--stroke);
+  color: var(--ink);
 }
 
 @keyframes dropIn {
@@ -598,7 +632,8 @@ button:hover {
   border: 1px solid var(--stroke);
   font-family: inherit;
   font-size: 14px;
-  background: #fff;
+  background: var(--card-solid);
+  color: var(--ink);
   cursor: pointer;
   min-width: 220px;
 }
@@ -622,7 +657,7 @@ button:hover {
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
-  background: #fff;
+  background: var(--card-solid);
   border: 1px solid var(--stroke);
   border-radius: 14px;
   cursor: pointer;
@@ -635,7 +670,7 @@ button:hover {
 
 .asset-item.enabled {
   border-color: var(--accent);
-  background: rgba(31, 122, 114, 0.05);
+  background: rgba(31, 122, 114, 0.08);
   box-shadow: 0 4px 12px rgba(31, 122, 114, 0.15);
 }
 
@@ -708,6 +743,12 @@ button:hover {
 
 .assets-status.error {
   color: var(--danger);
+}
+
+.theme-toggle {
+  font-size: 12px;
+  padding: 8px 14px;
+  border-radius: 999px;
 }
 
 @media (max-width: 720px) {

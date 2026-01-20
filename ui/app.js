@@ -27,6 +27,32 @@ const loginStatus = document.getElementById("login-status");
 const startBtn = document.getElementById("start-btn");
 const stopBtn = document.getElementById("stop-btn");
 const restartBtn = document.getElementById("restart-btn");
+const themeToggle = document.getElementById("theme-toggle");
+
+const THEME_KEY = "dashboard_theme";
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  if (themeToggle) {
+    themeToggle.textContent = theme === "dark" ? "Light Mode" : "Dark Mode";
+  }
+}
+
+const storedTheme = localStorage.getItem(THEME_KEY);
+if (storedTheme) {
+  applyTheme(storedTheme);
+} else {
+  const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  applyTheme(prefersDark ? "dark" : "light");
+}
+
+if (themeToggle) {
+  themeToggle.addEventListener("click", () => {
+    const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    localStorage.setItem(THEME_KEY, nextTheme);
+    applyTheme(nextTheme);
+  });
+}
 
 document.getElementById("refresh-btn").addEventListener("click", () => {
   refreshAll();

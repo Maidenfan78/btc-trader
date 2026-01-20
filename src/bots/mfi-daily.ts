@@ -1,8 +1,9 @@
 /**
- * MFI Daily Bot - BTC Daily Timeframe
+ * MFI Daily Bot - Multi-Asset Daily Timeframe
  *
- * Trades BTC on daily timeframe using MFI crossover signals.
+ * Trades on daily timeframe using MFI crossover signals.
  * Two-leg position management: TP leg + Runner leg with trailing stop.
+ * Now supports multiple assets via bots.json configuration.
  */
 
 import * as fs from 'fs';
@@ -13,7 +14,14 @@ import {
   generateSignal,
   isValidSignal,
   updatePositions,
-  getOpenLegs,
+  initializeMultiAssetState,
+  getAssetPositions,
+  updateAssetPositions,
+  canAssetTrade,
+  recordAssetTrade,
+  getMultiAssetSummary,
+  getTotalOpenPositions,
+  getTotalCapitalPerSignal,
   PaperBroker,
   LiveBroker,
   CircuitBreaker,
@@ -21,21 +29,27 @@ import {
   getBalanceSummary,
   createLogger,
   createTradingCSVLogger,
-  BotState,
+  MultiAssetBotState,
+  AssetSignal,
+  AssetConfig,
+  MultiAssetManagerConfig,
   Logger,
 } from 'trading-bot-platform';
 import { loadMFIDailyConfig } from '../config/mfi-daily.js';
+import { getAllAssets, getAssetsBySymbols } from '../config/assets.js';
+import { getBotEnabledAssets } from '../config/bots.js';
 
+const BOT_ID = 'btc-daily';
 const STATE_FILE = process.env.BOT_STATE_FILE || 'state.json';
 
 let logger: Logger;
 
 function getLogger(): Logger {
   if (!logger) {
-    const logFile = process.env.BOT_LOG_FILE || 'logs/bot-btc.log';
-    const errorFile = process.env.BOT_ERROR_LOG_FILE || 'logs/error-btc.log';
+    const logFile = process.env.BOT_LOG_FILE || 'logs/bot-btc-daily.log';
+    const errorFile = process.env.BOT_ERROR_LOG_FILE || 'logs/error-btc-daily.log';
     logger = createLogger({
-      botId: 'btc-daily',
+      botId: BOT_ID,
       logDir: 'logs',
       logLevel: 'info',
       logFile,
@@ -43,28 +57,6 @@ function getLogger(): Logger {
     });
   }
   return logger;
-}
-
-function getDefaultState(): BotState {
-  return {
-    lastProcessedCandleTime: 0,
-    lastTradeTime: 0,
-    openLegs: [],
-    totalTradesToday: 0,
-    lastDayReset: new Date().toISOString().split('T')[0],
-  };
-}
-
-function loadState(): BotState {
-  if (fs.existsSync(STATE_FILE)) {
-    try {
-      const data = fs.readFileSync(STATE_FILE, 'utf-8');
-      return JSON.parse(data);
-    } catch {
-      return getDefaultState();
-    }
-  }
-  return getDefaultState();
 }
 
 // Indicator snapshot for dashboard display
@@ -80,12 +72,141 @@ interface IndicatorSnapshot {
 
 let indicatorSnapshot: IndicatorSnapshot = {};
 
-function saveState(state: BotState): void {
-  const stateWithSnapshot = {
-    ...state,
-    indicatorSnapshot,
+function loadState(assets: AssetConfig[]): MultiAssetBotState {
+  const log = getLogger();
+  if (fs.existsSync(STATE_FILE)) {
+    try {
+      const data = fs.readFileSync(STATE_FILE, 'utf-8');
+      const state = JSON.parse(data);
+      log.info('Loaded existing daily bot state from disk');
+      return state;
+    } catch {
+      log.warn('Failed to load state file, initializing fresh state');
+      return initializeMultiAssetState(assets);
+    }
+  }
+  log.info('No existing state found, initializing fresh state');
+  return initializeMultiAssetState(assets);
+}
+
+function saveState(state: MultiAssetBotState): void {
+  const log = getLogger();
+  try {
+    const stateWithSnapshot = {
+      ...state,
+      indicatorSnapshot,
+    };
+    fs.writeFileSync(STATE_FILE, JSON.stringify(stateWithSnapshot, null, 2));
+    log.info('State saved to disk');
+  } catch (error) {
+    log.error('Failed to save state:', error);
+  }
+}
+
+/**
+ * Process a single asset
+ */
+async function processAsset(
+  asset: AssetConfig,
+  state: MultiAssetBotState,
+  config: ReturnType<typeof loadMFIDailyConfig>,
+  broker: PaperBroker | LiveBroker,
+  csvLogger: ReturnType<typeof createTradingCSVLogger>,
+  circuitBreaker: CircuitBreaker
+): Promise<AssetSignal | null> {
+  const log = getLogger();
+
+  log.info(`\n${'='.repeat(60)}`);
+  log.info(`Processing: ${asset.symbol} (${asset.name})`);
+  log.info('='.repeat(60));
+
+  // Fetch candles
+  const fetcher = new BinanceFetcher({ symbol: asset.binanceSymbol, interval: '1d' });
+  const numCandles = Math.max(config.mfiPeriod, config.atrPeriod) * 2;
+  const candles = await fetcher.fetchCandles(numCandles);
+  log.info(`Fetched ${candles.length} daily candles for ${asset.symbol}`);
+
+  const latestCandle = candles[candles.length - 1];
+
+  // Calculate indicators
+  const mfiSeries = calculateMFISeries(candles, config.mfiPeriod);
+  const atrSeries = calculateATRSeries(candles, config.atrPeriod);
+
+  const currentMFI = mfiSeries[mfiSeries.length - 1];
+  const previousMFI = mfiSeries[mfiSeries.length - 2];
+  const currentATR = atrSeries[atrSeries.length - 1];
+
+  if (currentMFI === null || previousMFI === null || currentATR === null) {
+    log.warn(`${asset.symbol}: Insufficient indicator data, skipping`);
+    return null;
+  }
+
+  log.info(`${asset.symbol} - Price: $${latestCandle.close.toFixed(2)}, MFI: ${currentMFI.toFixed(2)}, ATR: $${currentATR.toFixed(2)}`);
+
+  // Update indicator snapshot for dashboard
+  const trend = currentMFI <= config.mfiBuyLevel ? 'BULLISH' :
+                currentMFI >= config.mfiSellLevel ? 'BEARISH' : 'NEUTRAL';
+  indicatorSnapshot[asset.symbol] = {
+    price: latestCandle.close,
+    indicator: currentMFI,
+    atr: currentATR,
+    trend,
+    updatedAt: Date.now(),
   };
-  fs.writeFileSync(STATE_FILE, JSON.stringify(stateWithSnapshot, null, 2));
+
+  // Update existing positions
+  const assetPos = getAssetPositions(state, asset.symbol);
+  if (!assetPos) {
+    log.error(`${asset.symbol}: Asset not found in state`);
+    return null;
+  }
+
+  if (assetPos.openLegs.length > 0) {
+    log.info(`${asset.symbol}: Updating ${assetPos.openLegs.length} open positions...`);
+
+    const updatedLegs = updatePositions(assetPos.openLegs, latestCandle.close, currentATR);
+
+    // Log closed legs
+    const closedLegs = updatedLegs.filter(l =>
+      l.status === 'CLOSED' && !assetPos.openLegs.find(ol => ol.id === l.id && ol.status === 'CLOSED')
+    );
+    if (closedLegs.length > 0) {
+      for (const leg of closedLegs) {
+        log.info(`${asset.symbol}: ${leg.type} leg closed - ${leg.closeReason}`);
+        await broker.closeLeg(leg, latestCandle, leg.closeReason || 'Unknown');
+        csvLogger.logPositionLegClosure(leg, asset.symbol, config.paperMode ? 'PAPER' : 'LIVE');
+      }
+    }
+
+    updateAssetPositions(state, asset.symbol, updatedLegs);
+  }
+
+  // Generate signal
+  const signal = generateSignal(
+    previousMFI,
+    currentMFI,
+    latestCandle.close,
+    currentATR,
+    latestCandle.timestamp,
+    config.mfiBuyLevel,
+    config.mfiSellLevel
+  );
+
+  if (isValidSignal(signal)) {
+    log.info(`${asset.symbol}: Signal detected - ${signal.type}, MFI ${previousMFI.toFixed(2)} -> ${currentMFI.toFixed(2)}`);
+
+    return {
+      type: signal.type,
+      asset: asset.symbol,
+      price: latestCandle.close,
+      mfi: currentMFI,
+      atr: currentATR,
+      timestamp: latestCandle.timestamp,
+    };
+  }
+
+  log.info(`${asset.symbol}: No signal (MFI: ${currentMFI.toFixed(2)})`);
+  return null;
 }
 
 /**
@@ -95,7 +216,7 @@ async function runBotCycle() {
   const log = getLogger();
 
   try {
-    log.info('=== BTC MFI Bot Starting ===');
+    log.info('=== MFI Daily Bot Starting ===');
     log.info(`Timestamp: ${new Date().toISOString()}`);
 
     // Load config
@@ -107,20 +228,38 @@ async function runBotCycle() {
       log.warn('Live mode but trading disabled - will analyze only');
     }
 
+    // Load assets from bots.json
+    const allAssets = getAllAssets();
+    const enabledSymbols = getBotEnabledAssets(BOT_ID);
+    const assets = getAssetsBySymbols(enabledSymbols);
+
+    if (assets.length === 0) {
+      log.error('No enabled assets found for this bot');
+      return;
+    }
+
+    log.info(`Trading ${assets.length} asset(s): ${assets.map(a => a.symbol).join(', ')}`);
+
     // Load state
-    const state = loadState();
+    const state = loadState(allAssets);
     log.info('State loaded', {
-      openLegs: state.openLegs.length,
-      lastProcessed: new Date(state.lastProcessedCandleTime).toISOString(),
-      lastTrade: new Date(state.lastTradeTime).toISOString(),
+      totalOpenPositions: getTotalOpenPositions(state),
     });
+
+    // Create multi-asset manager config
+    const managerConfig: MultiAssetManagerConfig = {
+      assets: allAssets,
+      maxPositionsPerAsset: 2,
+      maxTotalPositions: 6,
+      minTimeBetweenTradesMs: 24 * 60 * 60 * 1000, // 24 hours
+    };
 
     // Initialize circuit breaker
     const circuitBreaker = new CircuitBreaker({
       maxDailyLossPct: 5.0,
       maxConsecutiveLosses: 3,
       maxDailyTrades: config.maxTradesPerDay,
-      minTimeBetweenTradesMs: 24 * 60 * 60 * 1000, // 24 hours
+      minTimeBetweenTradesMs: 24 * 60 * 60 * 1000,
       maxPriceDeviationPct: 10.0,
     });
 
@@ -171,148 +310,119 @@ async function runBotCycle() {
       );
 
       // Get current price for balance summary
-      const fetcher = new BinanceFetcher({ symbol: config.binanceSymbol, interval: '1d' });
+      const firstAsset = assets[0];
+      const fetcher = new BinanceFetcher({ symbol: firstAsset.binanceSymbol, interval: '1d' });
       const recentCandles = await fetcher.fetchCandles(1);
-      const currentBtcPrice = recentCandles[0].close;
+      const currentPrice = recentCandles[0].close;
 
-      log.info(getBalanceSummary(balances.usdc, balances.totalBtc, currentBtcPrice));
+      log.info(getBalanceSummary(balances.usdc, balances.totalBtc, currentPrice));
     }
 
-    // Fetch candles
-    const numCandles = Math.max(config.mfiPeriod, config.atrPeriod) * 2;
-    log.info(`Fetching ${numCandles} candles for ${config.binanceSymbol}...`);
+    // Show current position summary
+    log.info(getMultiAssetSummary(state));
+    log.info(`Total capital per full signal: $${getTotalCapitalPerSignal(allAssets)}`);
 
-    const fetcher = new BinanceFetcher({ symbol: config.binanceSymbol, interval: '1d' });
-    const candles = await fetcher.fetchCandles(numCandles);
-    const latestCandle = candles[candles.length - 1];
-
-    log.info('Latest candle:', {
-      timestamp: new Date(latestCandle.timestamp).toISOString(),
-      close: latestCandle.close.toFixed(2),
-      volume: latestCandle.volume.toFixed(2),
-    });
-
-    // Check if already processed
-    if (latestCandle.timestamp <= state.lastProcessedCandleTime) {
-      log.info('Candle already processed - nothing to do');
-      log.info('Bot run complete');
-      return;
-    }
-
-    // Calculate indicators
-    log.info('Calculating indicators...');
-    const mfiSeries = calculateMFISeries(candles, config.mfiPeriod);
-    const atrSeries = calculateATRSeries(candles, config.atrPeriod);
-
-    const currentMFI = mfiSeries[mfiSeries.length - 1];
-    const previousMFI = mfiSeries[mfiSeries.length - 2];
-    const currentATR = atrSeries[atrSeries.length - 1];
-
-    if (currentMFI === null || previousMFI === null || currentATR === null) {
-      log.error('Insufficient data to calculate indicators');
-      return;
-    }
-
-    log.info('Indicators calculated:', {
-      previousMFI: previousMFI.toFixed(2),
-      currentMFI: currentMFI.toFixed(2),
-      currentATR: currentATR.toFixed(2),
-    });
-
-    // Update indicator snapshot for dashboard
-    const trend = currentMFI <= config.mfiBuyLevel ? 'BULLISH' :
-                  currentMFI >= config.mfiSellLevel ? 'BEARISH' : 'NEUTRAL';
-    indicatorSnapshot['BTC'] = {
-      price: latestCandle.close,
-      indicator: currentMFI,
-      atr: currentATR,
-      trend,
-      updatedAt: Date.now(),
-    };
-
-    // Update existing positions
-    if (state.openLegs.length > 0) {
-      log.info(`Updating ${state.openLegs.length} open position(s)...`);
-
-      const updatedLegs = updatePositions(state.openLegs, latestCandle.close, currentATR);
-
-      // Close any legs that hit targets/stops
-      for (let i = 0; i < updatedLegs.length; i++) {
-        const leg = updatedLegs[i];
-        const wasOpen = state.openLegs[i].status === 'OPEN';
-        const nowClosed = leg.status === 'CLOSED';
-
-        if (wasOpen && nowClosed) {
-          log.info(`Closing ${leg.type} leg: ${leg.closeReason}`);
-
-          await broker.closeLeg(leg, latestCandle, leg.closeReason || 'Unknown');
-
-          // Log to CSV
-          csvLogger.logPositionLegClosure(
-            leg,
-            'BTC',
-            config.paperMode ? 'PAPER' : 'LIVE'
-          );
+    // Process each asset
+    const signals: AssetSignal[] = [];
+    for (const asset of assets) {
+      try {
+        const signal = await processAsset(asset, state, config, broker, csvLogger, circuitBreaker);
+        if (signal) {
+          signals.push(signal);
         }
+      } catch (error) {
+        log.error(`Error processing ${asset.symbol}:`, error);
+      }
+    }
+
+    // Handle signals
+    log.info(`\n${'='.repeat(80)}`);
+    log.info('SIGNAL PROCESSING');
+    log.info('='.repeat(80));
+
+    if (signals.length === 0) {
+      log.info('No signals generated across all assets');
+    } else {
+      log.info(`Generated ${signals.length} signal(s):`);
+      for (const signal of signals) {
+        log.info(`  ${signal.asset}: ${signal.type} at $${signal.price.toFixed(2)} (MFI: ${signal.mfi.toFixed(2)})`);
       }
 
-      state.openLegs = updatedLegs;
+      // Process LONG signals
+      const longSignals = signals.filter(s => s.type === 'LONG');
+      for (const signal of longSignals) {
+        const asset = assets.find(a => a.symbol === signal.asset);
+        if (!asset) continue;
 
-      const stillOpen = getOpenLegs(state.openLegs).length;
-      log.info(`Position update complete - ${stillOpen} still open`);
-    }
-
-    // Generate signal
-    log.info('Generating signal...');
-
-    const signal = generateSignal(
-      previousMFI,
-      currentMFI,
-      latestCandle.close,
-      currentATR,
-      latestCandle.timestamp,
-      config.mfiBuyLevel,
-      config.mfiSellLevel
-    );
-
-    log.info(`Signal: ${signal.type}`, {
-      mfi: `${previousMFI.toFixed(2)} -> ${currentMFI.toFixed(2)}`,
-      price: latestCandle.close.toFixed(2),
-      atr: currentATR.toFixed(2),
-    });
-
-    // Execute signal
-    if (isValidSignal(signal)) {
-      if (signal.type === 'LONG') {
+        // Check circuit breaker
         const canTradeCheck = circuitBreaker.canTrade();
-
         if (!canTradeCheck.allowed) {
-          log.warn('Trade blocked by circuit breaker:', canTradeCheck.reason);
-        } else if (config.liveTradingEnabled || config.paperMode) {
-          log.info('LONG Signal - Opening Position');
+          log.warn(`${signal.asset}: Trade blocked by circuit breaker - ${canTradeCheck.reason}`);
+          continue;
+        }
 
-          const newLegs = await broker.openPosition(signal, latestCandle);
+        // Check if we can trade this asset
+        const tradeCheck = canAssetTrade(
+          state,
+          signal.asset,
+          managerConfig,
+          signal.timestamp
+        );
 
-          if (newLegs) {
-            state.openLegs = [...state.openLegs, ...newLegs];
-            state.lastTradeTime = latestCandle.timestamp;
+        if (!tradeCheck.canTrade) {
+          log.info(`${signal.asset}: LONG signal filtered - ${tradeCheck.reason}`);
+          continue;
+        }
 
-            log.info('Position opened successfully');
-            log.info(`Open legs: ${getOpenLegs(state.openLegs).length}`);
+        if (!config.liveTradingEnabled && !config.paperMode) {
+          log.info(`${signal.asset}: LONG signal - trading disabled, skipping`);
+          continue;
+        }
+
+        // Open position
+        log.info(`${signal.asset}: Opening two-leg position...`);
+
+        const brokerSignal = {
+          type: 'LONG' as const,
+          entryPrice: signal.price,
+          targetPrice: signal.price + signal.atr * config.atrTpMult,
+          atr: signal.atr,
+          timestamp: signal.timestamp,
+          mfi: signal.mfi,
+          price: signal.price,
+        };
+
+        const candle = {
+          timestamp: signal.timestamp,
+          open: signal.price,
+          high: signal.price,
+          low: signal.price,
+          close: signal.price,
+          volume: 0,
+        };
+
+        const newLegs = await broker.openPosition(brokerSignal, candle);
+
+        if (newLegs) {
+          const assetPos = getAssetPositions(state, signal.asset);
+          if (assetPos) {
+            assetPos.openLegs = [...assetPos.openLegs, ...newLegs];
+            recordAssetTrade(state, signal.asset, signal.timestamp);
+            log.info(`${signal.asset}: Position opened successfully`);
 
             // Log to CSV
             const totalUSDC = newLegs.reduce((sum, leg) => sum + (leg.entryPrice * leg.quantity), 0);
             const totalQty = newLegs.reduce((sum, leg) => sum + leg.quantity, 0);
 
             csvLogger.logTradeEntry({
-              date: new Date(latestCandle.timestamp).toISOString(),
-              timestamp: latestCandle.timestamp,
-              asset: 'BTC',
+              date: new Date(signal.timestamp).toISOString(),
+              timestamp: signal.timestamp,
+              asset: signal.asset,
               action: 'OPEN',
               signalType: 'LONG',
               mfi: signal.mfi,
               atr: signal.atr,
-              price: latestCandle.close,
+              price: signal.price,
               totalUSDC,
               totalQuantity: totalQty,
               legsOpened: newLegs.length,
@@ -320,39 +430,66 @@ async function runBotCycle() {
               trailingStop: newLegs[0].trailingStop || 0,
               mode: config.paperMode ? 'PAPER' : 'LIVE',
             });
-          } else {
-            log.error('Failed to open position');
           }
+        } else {
+          log.error(`${signal.asset}: Failed to open position`);
         }
-      } else if (signal.type === 'SHORT') {
-        log.info('SHORT Signal - Trimming runners');
+      }
 
-        const beforeCount = getOpenLegs(state.openLegs).filter((l) => l.type === 'RUNNER').length;
+      // Process SHORT signals (trim runners)
+      const shortSignals = signals.filter(s => s.type === 'SHORT');
+      for (const signal of shortSignals) {
+        const assetPos = getAssetPositions(state, signal.asset);
+        if (!assetPos) continue;
 
-        if (beforeCount > 0) {
-          state.openLegs = await broker.trimRunners(state.openLegs, signal, latestCandle);
+        const runnersBefore = assetPos.openLegs.filter(l => l.type === 'RUNNER' && l.status === 'OPEN').length;
+
+        if (runnersBefore > 0) {
+          log.info(`${signal.asset}: SHORT signal - trimming ${runnersBefore} runner(s)`);
+
+          const brokerSignal = {
+            type: 'SHORT' as const,
+            entryPrice: signal.price,
+            targetPrice: 0,
+            atr: signal.atr,
+            timestamp: signal.timestamp,
+            mfi: signal.mfi,
+            price: signal.price,
+          };
+
+          const candle = {
+            timestamp: signal.timestamp,
+            open: signal.price,
+            high: signal.price,
+            low: signal.price,
+            close: signal.price,
+            volume: 0,
+          };
+
+          const updatedLegs = await broker.trimRunners(assetPos.openLegs, brokerSignal, candle);
 
           // Log trimmed runners
-          const trimmedRunners = state.openLegs.filter(
-            leg => leg.type === 'RUNNER' && leg.status === 'CLOSED' && leg.closeTime === latestCandle.timestamp
+          const trimmedRunners = updatedLegs.filter(
+            leg => leg.type === 'RUNNER' && leg.status === 'CLOSED' && leg.closeTime === signal.timestamp
           );
-          csvLogger.logPositionLegClosures(trimmedRunners, 'BTC', config.paperMode ? 'PAPER' : 'LIVE');
+          csvLogger.logPositionLegClosures(trimmedRunners, signal.asset, config.paperMode ? 'PAPER' : 'LIVE');
 
-          const afterCount = getOpenLegs(state.openLegs).filter((l) => l.type === 'RUNNER').length;
-          log.info(`Trimmed ${beforeCount - afterCount} runner(s)`);
-        } else {
-          log.info('No runners to trim');
+          updateAssetPositions(state, signal.asset, updatedLegs);
+
+          const runnersAfter = updatedLegs.filter(l => l.type === 'RUNNER' && l.status === 'OPEN').length;
+          log.info(`${signal.asset}: Trimmed ${runnersBefore - runnersAfter} runner(s)`);
         }
       }
     }
 
     // Save state
-    state.lastProcessedCandleTime = latestCandle.timestamp;
+    state.lastProcessedCandleTime = Date.now();
     saveState(state);
     log.info('State saved');
 
     // Final summary
     log.info(circuitBreaker.getSummary());
+    log.info(getMultiAssetSummary(state));
     log.info('=== Bot Run Complete ===');
 
   } catch (error: any) {
@@ -377,7 +514,11 @@ async function main() {
     const { startContinuousMode } = await import('../continuous/daily.js');
     await startContinuousMode(
       config,
-      () => loadState().lastProcessedCandleTime,
+      () => {
+        const allAssets = getAllAssets();
+        const state = loadState(allAssets);
+        return state.lastProcessedCandleTime;
+      },
       runBotCycle
     );
   } else {

@@ -21,7 +21,6 @@ import {
   recordAssetTrade,
   getMultiAssetSummary,
   getTotalOpenPositions,
-  getEnabledAssets,
   getTotalCapitalPerSignal,
   PaperBroker,
   createTradingCSVLogger,
@@ -34,7 +33,8 @@ import {
   MarketContext,
 } from 'trading-bot-platform';
 import { loadMFI4HConfig, getMFI4HLogger } from '../config/mfi-4h.js';
-import { getAssets } from '../config/assets.js';
+import { getAllAssets, getAssetsBySymbols } from '../config/assets.js';
+import { getBotEnabledAssets } from '../config/bots.js';
 
 const STATE_FILE = process.env.BOT_STATE_FILE || 'state-4h.json';
 
@@ -279,8 +279,9 @@ async function processAsset(
 async function runBotCycle4H() {
   const cycleStartTime = Date.now();
   const config = loadMFI4HConfig();
-  const allAssets = getAssets();
-  const assets = getEnabledAssets(allAssets);
+  const allAssets = getAllAssets();
+  const enabledSymbols = getBotEnabledAssets('4h-mfi');
+  const assets = getAssetsBySymbols(enabledSymbols);
   const state = loadState(allAssets);
   const log = getMFI4HLogger();
 

@@ -19,7 +19,6 @@ import {
   recordAssetTrade,
   getMultiAssetSummary,
   getTotalOpenPositions,
-  getEnabledAssets,
   getTotalCapitalPerSignal,
   PaperBroker,
   createTradingCSVLogger,
@@ -30,7 +29,8 @@ import {
   MultiAssetManagerConfig,
 } from 'trading-bot-platform';
 import { loadTDFIConfig, getTDFILogger } from '../config/tdfi.js';
-import { getAssets } from '../config/assets.js';
+import { getAllAssets, getAssetsBySymbols } from '../config/assets.js';
+import { getBotEnabledAssets } from '../config/bots.js';
 
 const STATE_FILE = process.env.BOT_STATE_FILE || 'state-tdfi.json';
 const TIMEFRAME = (process.env.BOT_TIMEFRAME || '4h').toLowerCase() === 'd1'
@@ -190,8 +190,9 @@ async function processAsset(
 
 async function runBotCycleTDFI() {
   const config = loadTDFIConfig();
-  const allAssets = getAssets();
-  const assets = getEnabledAssets(allAssets);
+  const allAssets = getAllAssets();
+  const enabledSymbols = getBotEnabledAssets('tdfi');
+  const assets = getAssetsBySymbols(enabledSymbols);
   const state = loadState(allAssets);
   const log = getTDFILogger();
 

@@ -19,7 +19,6 @@ import {
   recordAssetTrade,
   getMultiAssetSummary,
   getTotalOpenPositions,
-  getEnabledAssets,
   getTotalCapitalPerSignal,
   PaperBroker,
   createTradingCSVLogger,
@@ -30,7 +29,8 @@ import {
   MultiAssetManagerConfig,
 } from 'trading-bot-platform';
 import { loadTCF2Config, getTCF2Logger } from '../config/tcf2.js';
-import { getAssets } from '../config/assets.js';
+import { getAllAssets, getAssetsBySymbols } from '../config/assets.js';
+import { getBotEnabledAssets } from '../config/bots.js';
 
 const STATE_FILE = process.env.BOT_STATE_FILE || 'state-tcf2.json';
 const TIMEFRAME = (process.env.BOT_TIMEFRAME || '4h').toLowerCase() === 'd1'
@@ -192,8 +192,9 @@ async function processAsset(
 
 async function runBotCycleTCF2() {
   const config = loadTCF2Config();
-  const allAssets = getAssets();
-  const assets = getEnabledAssets(allAssets);
+  const allAssets = getAllAssets();
+  const enabledSymbols = getBotEnabledAssets('tcf2');
+  const assets = getAssetsBySymbols(enabledSymbols);
   const state = loadState(allAssets);
   const log = getTCF2Logger();
 

@@ -2,12 +2,20 @@
  * Dashboard Entry Point
  *
  * Launches the trading dashboard API server using the platform's
- * dashboard factory with your custom configuration.
+ * dashboard factory with your custom configuration, plus custom
+ * asset management routes.
  */
 
 import { createDashboardApp } from 'trading-bot-platform/dashboard';
 import { loadEnvConfig } from 'trading-bot-platform';
 import * as path from 'path';
+import { getAllAssets } from './config/assets.js';
+import {
+  getAllBotConfigs,
+  getBotConfig,
+  updateBotEnabledAssets,
+  clearBotConfigCache,
+} from './config/bots.js';
 
 // Load environment variables
 loadEnvConfig('.env');
@@ -31,7 +39,7 @@ const CSV_DIR = path.join(BASE_DIR, 'logs', 'csv');
 
 // CORS origins
 const CORS_ORIGINS = process.env.CORS_ORIGINS
-  ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
+  ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim())
   : ['http://localhost:5173', 'http://192.168.68.52:5173', 'http://192.168.68.20:5173'];
 
 async function main() {
@@ -57,9 +65,144 @@ async function main() {
       servicePrefix: 'bot@',
     });
 
+    // ==========================================================================
+    // Custom Asset Management Routes
+    // ==========================================================================
+
+    /**
+     * GET /api/assets - List all available assets
+     */
+    dashboard.app.get('/api/assets', (_req, res) => {
+      try {
+        const assets = getAllAssets();
+        res.json({
+          assets: assets.map((a) => ({
+            symbol: a.symbol,
+            name: a.name,
+            binanceSymbol: a.binanceSymbol,
+            tradeLegUsdc: a.tradeLegUsdc,
+            hasMint: !!a.solanaMint,
+          })),
+        });
+      } catch (error) {
+        console.error('Error fetching assets:', error);
+        res.status(500).json({ error: 'Failed to fetch assets' });
+      }
+    });
+
+    /**
+     * GET /api/bots/:botId/assets - Get enabled assets for a bot
+     */
+    dashboard.app.get('/api/bots/:botId/assets', (req, res) => {
+      try {
+        const { botId } = req.params;
+        const bot = getBotConfig(botId);
+
+        if (!bot) {
+          res.status(404).json({ error: `Bot not found: ${botId}` });
+          return;
+        }
+
+        res.json({
+          botId: bot.id,
+          botName: bot.name,
+          enabledAssets: bot.enabledAssets,
+        });
+      } catch (error) {
+        console.error('Error fetching bot assets:', error);
+        res.status(500).json({ error: 'Failed to fetch bot assets' });
+      }
+    });
+
+    /**
+     * PUT /api/bots/:botId/assets - Update enabled assets for a bot
+     * Requires authentication
+     */
+    dashboard.app.put('/api/bots/:botId/assets', (req, res) => {
+      try {
+        // Check for auth token (simple check - platform handles JWT validation)
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+          res.status(401).json({ error: 'Authentication required' });
+          return;
+        }
+
+        const { botId } = req.params;
+        const { enabledAssets } = req.body;
+
+        if (!Array.isArray(enabledAssets)) {
+          res.status(400).json({ error: 'enabledAssets must be an array' });
+          return;
+        }
+
+        // Validate that all requested assets exist
+        const allAssets = getAllAssets();
+        const validSymbols = new Set(allAssets.map((a) => a.symbol.toUpperCase()));
+        const invalidAssets = enabledAssets.filter(
+          (s: string) => !validSymbols.has(s.toUpperCase())
+        );
+
+        if (invalidAssets.length > 0) {
+          res.status(400).json({
+            error: `Unknown assets: ${invalidAssets.join(', ')}`,
+          });
+          return;
+        }
+
+        const success = updateBotEnabledAssets(botId, enabledAssets);
+
+        if (!success) {
+          res.status(404).json({ error: `Bot not found: ${botId}` });
+          return;
+        }
+
+        // Clear cache to ensure fresh data
+        clearBotConfigCache();
+
+        res.json({
+          success: true,
+          botId,
+          enabledAssets,
+          message: 'Assets updated. Restart bot to apply changes.',
+        });
+      } catch (error) {
+        console.error('Error updating bot assets:', error);
+        res.status(500).json({ error: 'Failed to update bot assets' });
+      }
+    });
+
+    /**
+     * GET /api/assets/summary - Get asset configuration summary for all bots
+     */
+    dashboard.app.get('/api/assets/summary', (_req, res) => {
+      try {
+        const assets = getAllAssets();
+        const bots = getAllBotConfigs();
+
+        const summary = {
+          totalAssets: assets.length,
+          assets: assets.map((a) => a.symbol),
+          bots: bots.map((bot) => ({
+            id: bot.id,
+            name: bot.name,
+            enabledAssets: bot.enabledAssets,
+            enabledCount: bot.enabledAssets.length,
+          })),
+        };
+
+        res.json(summary);
+      } catch (error) {
+        console.error('Error fetching assets summary:', error);
+        res.status(500).json({ error: 'Failed to fetch assets summary' });
+      }
+    });
+
+    // ==========================================================================
+
     await dashboard.start();
 
     console.log(`Dashboard API running on port ${PORT}`);
+    console.log(`Custom routes: GET /api/assets, GET/PUT /api/bots/:botId/assets`);
 
     // Graceful shutdown
     process.on('SIGINT', async () => {
@@ -73,7 +216,6 @@ async function main() {
       await dashboard.stop();
       process.exit(0);
     });
-
   } catch (error) {
     console.error('Failed to start dashboard:', error);
     process.exit(1);

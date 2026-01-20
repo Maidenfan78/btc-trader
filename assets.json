@@ -1,0 +1,50 @@
+[
+  {
+    "symbol": "wETH",
+    "name": "Wrapped Ethereum",
+    "binanceSymbol": "ETHUSDT",
+    "tradeLegUsdc": 100
+  },
+  {
+    "symbol": "SOL",
+    "name": "Solana",
+    "binanceSymbol": "SOLUSDT",
+    "tradeLegUsdc": 100
+  },
+  {
+    "symbol": "JUP",
+    "name": "Jupiter",
+    "binanceSymbol": "JUPUSDT",
+    "tradeLegUsdc": 100
+  },
+  {
+    "symbol": "WBTC",
+    "name": "Wrapped Bitcoin",
+    "binanceSymbol": "BTCUSDT",
+    "tradeLegUsdc": 100
+  },
+  {
+    "symbol": "LINK",
+    "name": "Chainlink",
+    "binanceSymbol": "LINKUSDT",
+    "tradeLegUsdc": 100
+  },
+  {
+    "symbol": "AAVE",
+    "name": "Aave",
+    "binanceSymbol": "AAVEUSDT",
+    "tradeLegUsdc": 100
+  },
+  {
+    "symbol": "RENDER",
+    "name": "Render",
+    "binanceSymbol": "RENDERUSDT",
+    "tradeLegUsdc": 100
+  },
+  {
+    "symbol": "UNI",
+    "name": "Uniswap",
+    "binanceSymbol": "UNIUSDT",
+    "tradeLegUsdc": 100
+  }
+]

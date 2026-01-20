@@ -611,11 +611,197 @@ timelineTypeFilter.addEventListener("change", () => loadTimeline(true));
 timelineLoadMore.addEventListener("click", () => loadTimeline(false));
 
 // ============================================================================
+// Asset Configuration
+// ============================================================================
+
+const assetsBotSelect = document.getElementById("assets-bot-select");
+const assetsGrid = document.getElementById("assets-grid");
+const assetsActions = document.getElementById("assets-actions");
+const assetsSaveBtn = document.getElementById("assets-save-btn");
+const assetsStatus = document.getElementById("assets-status");
+const assetsRefreshBtn = document.getElementById("assets-refresh-btn");
+
+const assetsState = {
+  allAssets: [],
+  selectedBot: null,
+  enabledAssets: [],
+  originalEnabledAssets: [],
+};
+
+async function loadAllAssets() {
+  try {
+    const response = await apiFetch("/api/assets");
+    if (!response.ok) throw new Error("Failed to load assets");
+    const data = await response.json();
+    assetsState.allAssets = data.assets || [];
+  } catch (error) {
+    console.error("Failed to load assets:", error);
+  }
+}
+
+function populateAssetsBotSelector() {
+  if (state.bots.length === 0) return;
+
+  const options = state.bots.map(
+    (bot) => `<option value="${bot.id}">${bot.name}</option>`
+  );
+  assetsBotSelect.innerHTML =
+    `<option value="">-- Choose a bot --</option>` + options.join("");
+}
+
+async function loadBotAssets(botId) {
+  if (!botId) {
+    assetsState.selectedBot = null;
+    assetsState.enabledAssets = [];
+    assetsState.originalEnabledAssets = [];
+    renderAssetsGrid();
+    return;
+  }
+
+  try {
+    const response = await apiFetch(`/api/bots/${botId}/assets`);
+    if (!response.ok) throw new Error("Failed to load bot assets");
+    const data = await response.json();
+
+    assetsState.selectedBot = botId;
+    assetsState.enabledAssets = [...data.enabledAssets];
+    assetsState.originalEnabledAssets = [...data.enabledAssets];
+
+    renderAssetsGrid();
+  } catch (error) {
+    console.error("Failed to load bot assets:", error);
+    assetsStatus.textContent = "Failed to load bot assets";
+    assetsStatus.className = "assets-status error";
+  }
+}
+
+function renderAssetsGrid() {
+  if (!assetsState.selectedBot || assetsState.allAssets.length === 0) {
+    assetsGrid.innerHTML = `<div class="assets-placeholder">Select a bot to configure assets</div>`;
+    assetsActions.style.display = "none";
+    return;
+  }
+
+  const enabledSet = new Set(
+    assetsState.enabledAssets.map((s) => s.toUpperCase())
+  );
+
+  const html = assetsState.allAssets
+    .map((asset) => {
+      const isEnabled = enabledSet.has(asset.symbol.toUpperCase());
+      const noMint = !asset.hasMint;
+
+      return `
+      <div class="asset-item ${isEnabled ? "enabled" : ""} ${noMint ? "no-mint" : ""}"
+           data-symbol="${asset.symbol}">
+        <div class="asset-checkbox"></div>
+        <div class="asset-info">
+          <div class="asset-symbol">${asset.symbol}</div>
+          <div class="asset-name">${asset.name}</div>
+          ${noMint ? `<div class="asset-warning">No mint configured</div>` : ""}
+        </div>
+      </div>
+    `;
+    })
+    .join("");
+
+  assetsGrid.innerHTML = html;
+  assetsActions.style.display = "flex";
+  assetsStatus.textContent = "";
+  assetsStatus.className = "assets-status";
+
+  // Add click handlers
+  assetsGrid.querySelectorAll(".asset-item").forEach((item) => {
+    item.addEventListener("click", () => {
+      const symbol = item.dataset.symbol;
+      toggleAsset(symbol);
+    });
+  });
+}
+
+function toggleAsset(symbol) {
+  const upperSymbol = symbol.toUpperCase();
+  const index = assetsState.enabledAssets.findIndex(
+    (s) => s.toUpperCase() === upperSymbol
+  );
+
+  if (index >= 0) {
+    assetsState.enabledAssets.splice(index, 1);
+  } else {
+    // Find original case from allAssets
+    const asset = assetsState.allAssets.find(
+      (a) => a.symbol.toUpperCase() === upperSymbol
+    );
+    assetsState.enabledAssets.push(asset ? asset.symbol : symbol);
+  }
+
+  renderAssetsGrid();
+}
+
+async function saveAssetConfig() {
+  if (!assetsState.selectedBot) return;
+
+  if (!state.token) {
+    assetsStatus.textContent = "Login required to save changes";
+    assetsStatus.className = "assets-status error";
+    return;
+  }
+
+  try {
+    assetsStatus.textContent = "Saving...";
+    assetsStatus.className = "assets-status";
+
+    const response = await apiFetch(
+      `/api/bots/${assetsState.selectedBot}/assets`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabledAssets: assetsState.enabledAssets }),
+      }
+    );
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || "Failed to save");
+    }
+
+    const data = await response.json();
+    assetsState.originalEnabledAssets = [...assetsState.enabledAssets];
+
+    assetsStatus.textContent = data.message || "Saved successfully";
+    assetsStatus.className = "assets-status success";
+  } catch (error) {
+    assetsStatus.textContent = error.message;
+    assetsStatus.className = "assets-status error";
+  }
+}
+
+// Event listeners
+assetsBotSelect.addEventListener("change", (e) => {
+  loadBotAssets(e.target.value);
+});
+
+assetsSaveBtn.addEventListener("click", saveAssetConfig);
+
+assetsRefreshBtn.addEventListener("click", async () => {
+  await loadAllAssets();
+  if (assetsState.selectedBot) {
+    await loadBotAssets(assetsState.selectedBot);
+  }
+});
+
+// ============================================================================
 // Initialize
 // ============================================================================
 
-refreshAll();
-loadTimelineFilters();
-loadTimeline(true);
+async function initializeApp() {
+  await refreshAll();
+  await loadAllAssets();
+  populateAssetsBotSelector();
+  loadTimelineFilters();
+  loadTimeline(true);
+}
+
+initializeApp();
 setInterval(refreshAll, 30000);
 setInterval(() => loadTimeline(true), 60000);

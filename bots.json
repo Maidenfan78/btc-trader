@@ -7,7 +7,8 @@
     "serviceName": "bot@btc-daily",
     "csvDir": "btc-daily",
     "indicator": "mfi",
-    "timeframe": "1d"
+    "timeframe": "1d",
+    "enabledAssets": ["WBTC"]
   },
   {
     "id": "4h-mfi",
@@ -17,7 +18,8 @@
     "serviceName": "bot@4h-mfi",
     "csvDir": "4h-mfi",
     "indicator": "mfi",
-    "timeframe": "4h"
+    "timeframe": "4h",
+    "enabledAssets": ["wETH", "SOL", "JUP"]
   },
   {
     "id": "tcf2",
@@ -27,7 +29,8 @@
     "serviceName": "bot@tcf2",
     "csvDir": "tcf2",
     "indicator": "tcf2",
-    "timeframe": "4h"
+    "timeframe": "4h",
+    "enabledAssets": ["wETH", "SOL", "JUP"]
   },
   {
     "id": "kpss",
@@ -37,7 +40,8 @@
     "serviceName": "bot@kpss",
     "csvDir": "kpss",
     "indicator": "kpss",
-    "timeframe": "4h"
+    "timeframe": "4h",
+    "enabledAssets": ["wETH", "SOL", "JUP"]
   },
   {
     "id": "tdfi",
@@ -47,7 +51,8 @@
     "serviceName": "bot@tdfi",
     "csvDir": "tdfi",
     "indicator": "tdfi",
-    "timeframe": "4h"
+    "timeframe": "4h",
+    "enabledAssets": ["wETH", "SOL", "JUP"]
   },
   {
     "id": "dssmom",
@@ -57,6 +62,7 @@
     "serviceName": "bot@dssmom",
     "csvDir": "dssmom",
     "indicator": "dssmom",
-    "timeframe": "4h"
+    "timeframe": "4h",
+    "enabledAssets": ["wETH", "SOL", "JUP"]
   }
 ]

@@ -146,6 +146,26 @@
         <button class="ghost timeline-load-more" id="timeline-load-more">Load More</button>
       </section>
 
+      <section class="panel assets-panel">
+        <div class="panel-header">
+          <h2>Asset Configuration</h2>
+          <button class="ghost" id="assets-refresh-btn">Refresh</button>
+        </div>
+        <div class="assets-bot-selector">
+          <label for="assets-bot-select">Select Bot:</label>
+          <select id="assets-bot-select">
+            <option value="">-- Choose a bot --</option>
+          </select>
+        </div>
+        <div class="assets-grid" id="assets-grid">
+          <div class="assets-placeholder">Select a bot to configure assets</div>
+        </div>
+        <div class="assets-actions" id="assets-actions" style="display: none;">
+          <button class="primary" id="assets-save-btn">Save Changes</button>
+          <span class="assets-status" id="assets-status"></span>
+        </div>
+      </section>
+
       <section class="panel auth">
         <div class="panel-header">
           <h2>Admin Access</h2>

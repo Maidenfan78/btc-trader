@@ -47,6 +47,7 @@ nul
 tests.txt
 bot_backup/
 prompts.txt
+chat-session.txt
 
 # System files
 *.tmp

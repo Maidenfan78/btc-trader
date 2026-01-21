@@ -102,6 +102,13 @@ function createJournalEmitter(config: ReturnType<typeof loadKPSSConfig>): Journa
   });
 }
 
+function setBrokerTradeLegUsdc(broker: PaperBroker | LiveBroker, tradeLegUsdc: number): void {
+  const mutable = broker as unknown as { config?: { tradeLegUsdc?: number } };
+  if (mutable.config) {
+    mutable.config.tradeLegUsdc = tradeLegUsdc;
+  }
+}
+
 function saveState(state: MultiAssetBotState): void {
   const log = getKPSSLogger();
   try {
@@ -386,6 +393,8 @@ async function runBotCycleKPSS() {
       }
 
       log.info(`${signal.asset}: Opening two-leg position...`);
+
+      setBrokerTradeLegUsdc(broker, asset.tradeLegUsdc ?? config.tradeLegUsdc);
 
       const brokerSignal = {
         type: 'LONG' as const,

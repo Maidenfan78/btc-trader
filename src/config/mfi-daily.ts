@@ -7,8 +7,8 @@
 import { loadEnvConfig, getRequiredEnv, getOptionalEnv, getNumericEnv, getBooleanEnv } from 'trading-bot-platform';
 import { MFIDailyConfig } from './types';
 
-// Load environment on module import
-loadEnvConfig('.env');
+// Load global env first, then per-bot env
+loadEnvConfig('.env', process.env.BOT_ENV_FILE || '.env.btc-daily');
 
 export function loadMFIDailyConfig(): MFIDailyConfig {
   const paperMode = getBooleanEnv('PAPER_MODE', true);

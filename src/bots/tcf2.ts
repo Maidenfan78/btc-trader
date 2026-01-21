@@ -102,6 +102,13 @@ function createJournalEmitter(config: ReturnType<typeof loadTCF2Config>): Journa
   });
 }
 
+function setBrokerTradeLegUsdc(broker: PaperBroker | LiveBroker, tradeLegUsdc: number): void {
+  const mutable = broker as unknown as { config?: { tradeLegUsdc?: number } };
+  if (mutable.config) {
+    mutable.config.tradeLegUsdc = tradeLegUsdc;
+  }
+}
+
 function saveState(state: MultiAssetBotState): void {
   const log = getTCF2Logger();
   try {
@@ -391,6 +398,8 @@ async function runBotCycleTCF2() {
       log.info(`  Position Size: $${asset.tradeLegUsdc} per leg ($${asset.tradeLegUsdc * 2} total)`);
       log.info(`  TP Target: $${(signal.price + signal.atr * config.atrTpMultiplier).toFixed(2)}`);
       log.info(`  Breakeven Lock: $${(signal.price + signal.atr * config.breakEvenLockMultiplier).toFixed(2)}`);
+
+      setBrokerTradeLegUsdc(broker, asset.tradeLegUsdc ?? config.tradeLegUsdc);
 
       const brokerSignal = {
         type: 'LONG' as const,

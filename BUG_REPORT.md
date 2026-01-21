@@ -28,18 +28,21 @@ Code review identified **2 high**, **2 moderate**, and **1 low** severity issues
 **Severity:** Moderate  
 **File:** `src/config/mfi-daily.ts`  
 **Impact:** `BOT_ENV_FILE` (e.g., `.env.btc-daily`) is never loaded, so per-bot overrides are silently ignored.
+**Status:** **FIXED** (2026-01-21)
 
 ### BUG-007: MFI 4H State File Name Mismatch in Direct Runs
 
 **Severity:** Moderate  
 **File:** `src/bots/mfi-4h.ts`  
 **Impact:** Direct runs default to `state-4h.json` while `bots.json` and `bot-runner` use `state-4h-mfi.json`, causing inconsistent state and potential duplicate trades.
+**Status:** **FIXED** (2026-01-21)
 
 ### BUG-008: Hardcoded Trade Size in 4H Bots
 
 **Severity:** Low  
 **Files:** `src/bots/mfi-4h.ts`, `src/bots/tcf2.ts`, `src/bots/kpss.ts`, `src/bots/tdfi.ts`, `src/bots/dssmom.ts`  
 **Impact:** `PaperBroker` is initialized with `tradeLegUsdc: 100`, ignoring `assets.json` per-asset sizing.
+**Status:** **FIXED** (2026-01-21)
 
 ---
 

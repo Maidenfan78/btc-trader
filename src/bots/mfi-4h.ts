@@ -38,7 +38,7 @@ import { getAllAssets, getAssetsBySymbols } from '../config/assets.js';
 import { getBotEnabledAssets } from '../config/bots.js';
 import { hydrateMultiAssetState } from '../config/state.js';
 
-const STATE_FILE = process.env.BOT_STATE_FILE || 'state-4h.json';
+const STATE_FILE = process.env.BOT_STATE_FILE || 'state-4h-mfi.json';
 
 function loadState(assets: AssetConfig[]): MultiAssetBotState {
   const log = getMFI4HLogger();
@@ -104,6 +104,13 @@ function createJournalEmitter(config: ReturnType<typeof loadMFI4HConfig>): Journ
     mode: config.paperMode ? 'PAPER' : 'LIVE',
     eventStore,
   });
+}
+
+function setBrokerTradeLegUsdc(broker: PaperBroker | LiveBroker, tradeLegUsdc: number): void {
+  const mutable = broker as unknown as { config?: { tradeLegUsdc?: number } };
+  if (mutable.config) {
+    mutable.config.tradeLegUsdc = tradeLegUsdc;
+  }
 }
 
 /**
@@ -437,6 +444,8 @@ async function runBotCycle4H() {
       log.info(`  Position Size: $${asset.tradeLegUsdc} per leg ($${asset.tradeLegUsdc * 2} total)`);
       log.info(`  TP Target: $${(signal.price + signal.atr * config.atrTpMultiplier).toFixed(2)}`);
       log.info(`  Breakeven Lock: $${(signal.price + signal.atr * config.breakEvenLockMultiplier).toFixed(2)}`);
+
+      setBrokerTradeLegUsdc(broker, asset.tradeLegUsdc ?? config.tradeLegUsdc);
 
       const brokerSignal = {
         type: 'LONG' as const,

@@ -5,6 +5,7 @@ const state = {
   token: localStorage.getItem("dashboard_token") || "",
   bots: [],
   status: {},
+  openPositions: {},
   selectedBot: null,
   timelineEvents: [],
   timelineOffset: 0,
@@ -17,6 +18,7 @@ const updatedPill = document.getElementById("updated-pill");
 const metricsBots = document.getElementById("metric-bots");
 const metricsRunning = document.getElementById("metric-running");
 const metricsPositions = document.getElementById("metric-positions");
+const metricsUnrealizedPnL = document.getElementById("metric-unrealized-pnl");
 const detailTitle = document.getElementById("detail-title");
 const detailSubtitle = document.getElementById("detail-subtitle");
 const positionsTable = document.getElementById("positions-table");
@@ -98,6 +100,7 @@ async function apiFetch(path, options = {}) {
 
 async function refreshAll() {
   await Promise.all([loadHealth(), loadBots(), loadStatus()]);
+  await loadOpenPositions();
   updateMetrics();
   renderBots();
   if (!state.selectedBot && state.bots.length > 0) {
@@ -134,6 +137,37 @@ async function loadStatus() {
   updatedPill.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
 }
 
+async function loadOpenPositions() {
+  const summaries = {};
+
+  await Promise.all(
+    state.bots.map(async (bot) => {
+      try {
+        const response = await apiFetch(`/api/positions/${bot.id}`);
+        if (!response.ok) {
+          summaries[bot.id] = { count: 0, unrealizedPnL: 0 };
+          return;
+        }
+        const data = await response.json();
+        const positions = data.positions || [];
+        const unrealizedPnL = positions.reduce((sum, pos) => {
+          const pnl = Number(pos.unrealizedPnL);
+          return sum + (Number.isFinite(pnl) ? pnl : 0);
+        }, 0);
+
+        summaries[bot.id] = {
+          count: positions.length,
+          unrealizedPnL,
+        };
+      } catch (_error) {
+        summaries[bot.id] = { count: 0, unrealizedPnL: 0 };
+      }
+    })
+  );
+
+  state.openPositions = summaries;
+}
+
 function updateMetrics() {
   const botCount = state.bots.length;
   const runningCount = Object.values(state.status).filter((bot) => bot.running).length;
@@ -145,6 +179,10 @@ function updateMetrics() {
     const pnl = bot.state?.performance?.totalPnL || 0;
     return sum + pnl;
   }, 0);
+  const totalUnrealizedPnL = Object.values(state.openPositions).reduce((sum, bot) => {
+    const pnl = bot.unrealizedPnL || 0;
+    return sum + pnl;
+  }, 0);
 
   metricsBots.textContent = botCount;
   metricsRunning.textContent = runningCount;
@@ -154,6 +192,11 @@ function updateMetrics() {
   if (metricsPnL) {
     metricsPnL.textContent = formatPnL(totalPnL);
     metricsPnL.className = totalPnL >= 0 ? "pnl-positive" : "pnl-negative";
+  }
+
+  if (metricsUnrealizedPnL) {
+    metricsUnrealizedPnL.textContent = formatPnL(totalUnrealizedPnL);
+    metricsUnrealizedPnL.className = totalUnrealizedPnL >= 0 ? "pnl-positive" : "pnl-negative";
   }
 }
 
@@ -172,6 +215,9 @@ function renderBots() {
     const trades = perf.totalTrades || 0;
     const winRate = perf.winRate || 0;
     const lastTradeTime = status.state?.lastTradeTime || 0;
+    const openSummary = state.openPositions[bot.id] || { count: 0, unrealizedPnL: 0 };
+    const openPnL = openSummary.unrealizedPnL || 0;
+    const openTrades = openSummary.count || 0;
     const lastTradeStr = lastTradeTime > 0 ? formatTimeAgo(lastTradeTime) : "Never";
 
     const card = document.createElement("div");
@@ -182,6 +228,10 @@ function renderBots() {
       <div class="bot-stats">
         <span class="${pnl >= 0 ? "pnl-positive" : "pnl-negative"}">${formatPnL(pnl)}</span>
         <span class="meta">${trades} trades${trades > 0 ? ` (${(winRate * 100).toFixed(0)}% win)` : ""}</span>
+      </div>
+      <div class="bot-stats">
+        <span class="${openPnL >= 0 ? "pnl-positive" : "pnl-negative"}">${formatPnL(openPnL)}</span>
+        <span class="meta">${openTrades} open</span>
       </div>
       <div class="meta">Last trade: ${lastTradeStr}</div>
       <div class="badge ${running ? "" : "offline"}">${running ? "Running" : "Stopped"}</div>

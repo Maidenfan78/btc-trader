@@ -57,6 +57,8 @@ export function loadDSSMOMConfig(): DSSMOMConfig {
 
     // Tokens
     usdcMint: getRequiredEnv('USDC_MINT'),
+    wbtcMint: getRequiredEnv('WBTC_MINT'),
+    cbBtcMint: getOptionalEnv('CB_BTC_MINT', '') || undefined,
 
     // DSS-MOM Settings
     dssemaPeriod: getEnvNumber('DSS_EMA_PERIOD', 8),
@@ -76,6 +78,9 @@ export function loadDSSMOMConfig(): DSSMOMConfig {
     // Position Management
     breakEvenLockMultiplier: getEnvNumber('BREAKEVEN_LOCK_MULT', 0.25),
 
+    // Trade Settings
+    tradeLegUsdc: getEnvNumber('TRADE_LEG_USDC', 100),
+
     // Risk Management
     maxPositionsPerAsset: getEnvNumber('MAX_POSITIONS_PER_ASSET', 1),
     maxTotalPositions: getEnvNumber('MAX_TOTAL_POSITIONS', 3),
@@ -88,6 +93,9 @@ export function loadDSSMOMConfig(): DSSMOMConfig {
 
     // Safety
     slippageBps: getEnvNumber('SLIPPAGE_BPS', 50),
+    maxPriceImpactBps: getEnvNumber('MAX_PRICE_IMPACT_BPS', 100),
+    minBtcBalance: getEnvNumber('MIN_BTC_BALANCE', 0.001),
+    minUsdcReserve: getEnvNumber('MIN_USDC_RESERVE', 50),
     paperMode: getEnvBoolean('PAPER_MODE', true),
     liveTradingEnabled: getEnvBoolean('LIVE_TRADING_ENABLED', false),
   };
@@ -132,12 +140,26 @@ function validateDSSMOMConfig(config: DSSMOMConfig, log: Logger): void {
     throw new Error(`MAX_TOTAL_POSITIONS (${config.maxTotalPositions}) must be >= MAX_POSITIONS_PER_ASSET (${config.maxPositionsPerAsset})`);
   }
 
+  if (config.tradeLegUsdc < 1) {
+    throw new Error(`TRADE_LEG_USDC must be at least 1, got ${config.tradeLegUsdc}`);
+  }
+
+  if (config.slippageBps < 0 || config.slippageBps > 1000) {
+    throw new Error(`SLIPPAGE_BPS must be between 0-1000, got ${config.slippageBps}`);
+  }
+  if (config.maxPriceImpactBps < 0 || config.maxPriceImpactBps > 1000) {
+    throw new Error(`MAX_PRICE_IMPACT_BPS must be between 0-1000, got ${config.maxPriceImpactBps}`);
+  }
+
   // Safety check for live trading
   if (!config.paperMode && !config.liveTradingEnabled) {
     throw new Error('PAPER_MODE=false requires LIVE_TRADING_ENABLED=true');
   }
   if (!config.paperMode && !config.walletSecretKey) {
     throw new Error('WALLET_SECRET_KEY is required for live trading');
+  }
+  if (!config.paperMode && !config.wbtcMint) {
+    throw new Error('WBTC_MINT is required for live trading');
   }
   if (config.paperMode && !config.walletSecretKey) {
     log.warn('WALLET_SECRET_KEY is not set. Paper trading will run without a wallet.');

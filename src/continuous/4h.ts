@@ -79,7 +79,7 @@ export async function startContinuous4H(
 
   let lastExecutedCandle = 0;
 
-  const checkAndExecute = async () => {
+  while (true) {
     const lastCandleClose = getLastCandleCloseTime();
     const executionTime = lastCandleClose + config.executionOffsetMinutes * 60 * 1000;
     const windowMs = TIMEFRAME === '1h'
@@ -108,11 +108,7 @@ export async function startContinuous4H(
     log.info(`Next check in ${Math.round(checkInterval / 60000)} minutes (next ${getTimeframeLabel()}: ${new Date(nextExecution).toISOString()})`);
 
     await sleep(checkInterval);
-    await checkAndExecute();
-  };
-
-  // Initial run
-  await checkAndExecute();
+  }
 }
 
 export { getLastCandleCloseTime, getNextCandleCloseTime, getTimeframeLabel };

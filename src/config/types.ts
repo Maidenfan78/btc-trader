@@ -67,6 +67,8 @@ export interface MultiAssetConfig {
 
   // Tokens
   usdcMint: string;
+  wbtcMint: string;
+  cbBtcMint?: string;
 
   // MFI Settings (for MFI bots)
   mfiPeriod: number;
@@ -78,6 +80,9 @@ export interface MultiAssetConfig {
   atrTpMultiplier: number;
   atrTrailMultiplier: number;
   breakEvenLockMultiplier: number;
+
+  // Trade Settings
+  tradeLegUsdc: number;
 
   // Position Limits
   maxPositionsPerAsset: number;
@@ -91,6 +96,9 @@ export interface MultiAssetConfig {
 
   // Safety
   slippageBps: number;
+  maxPriceImpactBps: number;
+  minBtcBalance: number;
+  minUsdcReserve: number;
   paperMode: boolean;
   liveTradingEnabled: boolean;
 }

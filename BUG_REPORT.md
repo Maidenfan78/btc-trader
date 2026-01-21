@@ -14,12 +14,14 @@ Code review identified **2 high**, **2 moderate**, and **1 low** severity issues
 **Severity:** High  
 **File:** `src/continuous/4h.ts`  
 **Impact:** Long-running 4H bots can eventually hit a stack overflow or memory growth because `checkAndExecute()` recursively `await`s itself without unwinding the call stack.
+**Status:** **FIXED** (2026-01-21)
 
 ### BUG-005: 4H Bots Ignore Live Trading Flags
 
 **Severity:** High  
 **Files:** `src/bots/mfi-4h.ts`, `src/bots/tcf2.ts`, `src/bots/kpss.ts`, `src/bots/tdfi.ts`, `src/bots/dssmom.ts`  
 **Impact:** Even with `PAPER_MODE=false` and `LIVE_TRADING_ENABLED=true`, these bots always use `PaperBroker`, so they never execute live orders.
+**Status:** **FIXED** (2026-01-21)
 
 ### BUG-006: Daily Bot Ignores Per-Bot Env File
 

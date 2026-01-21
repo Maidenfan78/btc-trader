@@ -21,6 +21,7 @@ import {
   getTotalOpenPositions,
   getTotalCapitalPerSignal,
   PaperBroker,
+  LiveBroker,
   createTradingCSVLogger,
   MultiAssetBotState,
   AssetSignal,
@@ -119,7 +120,7 @@ async function processAsset(
   asset: AssetConfig,
   state: MultiAssetBotState,
   config: ReturnType<typeof loadTDFIConfig>,
-  broker: PaperBroker,
+  broker: PaperBroker | LiveBroker,
   csvLogger: ReturnType<typeof createTradingCSVLogger>,
   journal: JournalEmitter
 ): Promise<AssetSignal | null> {
@@ -281,12 +282,33 @@ async function runBotCycleTDFI() {
   const csvDir = process.env.BOT_CSV_DIR || 'logs/csv/tdfi';
   const csvLogger = createTradingCSVLogger({ csvDir });
 
-  const broker = new PaperBroker({
-    initialUsdcBalance: 10000,
-    initialBtcBalance: 0,
-    slippageBps: config.slippageBps,
-    tradeLegUsdc: 100,
-  });
+  let broker: PaperBroker | LiveBroker;
+
+  if (config.paperMode) {
+    broker = new PaperBroker({
+      initialUsdcBalance: 10000,
+      initialBtcBalance: 0,
+      slippageBps: config.slippageBps,
+      tradeLegUsdc: config.tradeLegUsdc,
+    });
+    log.info('Paper broker initialized');
+  } else {
+    broker = new LiveBroker({
+      rpcUrl: config.solanaRpcUrl,
+      walletSecretKey: config.walletSecretKey,
+      usdcMint: config.usdcMint,
+      cbBtcMint: config.cbBtcMint,
+      wbtcMint: config.wbtcMint,
+      slippageBps: config.slippageBps,
+      maxPriceImpactBps: config.maxPriceImpactBps,
+      tradeLegUsdc: config.tradeLegUsdc,
+      atrTpMultiplier: config.atrTpMultiplier,
+      atrTrailMultiplier: config.atrTrailMultiplier,
+      minBtcBalance: config.minBtcBalance,
+      minUsdcReserve: config.minUsdcReserve,
+    }, log);
+    log.info('Live broker initialized');
+  }
 
   log.info(`Trading ${assets.length} assets: ${assets.map(a => a.symbol).join(', ')}`);
   log.info(`Total capital per full signal: $${getTotalCapitalPerSignal(allAssets)}`);

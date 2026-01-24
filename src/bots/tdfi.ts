@@ -544,10 +544,16 @@ async function runBotCycleTDFI() {
       const assetPos = getAssetPositions(state, signal.asset);
       if (!assetPos) continue;
 
-      const runnersBefore = assetPos.openLegs.filter(l => l.type === 'RUNNER' && l.status === 'OPEN').length;
+      const openRunners = assetPos.openLegs.filter(l => l.type === 'RUNNER' && l.status === 'OPEN');
+      const profitableRunners = openRunners.filter(l => signal.price >= l.entryPrice);
+      const unprofitableCount = openRunners.length - profitableRunners.length;
 
-      if (runnersBefore > 0) {
-        log.info(`${signal.asset}: SHORT signal - trimming ${runnersBefore} runner(s)`);
+      if (unprofitableCount > 0) {
+        log.info(`${signal.asset}: SHORT signal - skipping ${unprofitableCount} unprofitable runner(s)`);
+      }
+
+      if (profitableRunners.length > 0) {
+        log.info(`${signal.asset}: SHORT signal - trimming ${profitableRunners.length} profitable runner(s)`);
 
         const brokerSignal = {
           type: 'SHORT' as const,
@@ -568,18 +574,24 @@ async function runBotCycleTDFI() {
           volume: 0,
         };
 
-        const updatedLegs = await broker.trimRunners(assetPos.openLegs, brokerSignal, candle);
+        // Only pass profitable runners to trimRunners, keep unprofitable ones unchanged
+        const nonRunnerLegs = assetPos.openLegs.filter(l => l.type !== 'RUNNER' || l.status !== 'OPEN');
+        const unprofitableRunners = openRunners.filter(l => signal.price < l.entryPrice);
 
-        const trimmedRunners = updatedLegs.filter(
+        const updatedProfitableLegs = await broker.trimRunners(profitableRunners, brokerSignal, candle);
+
+        // Merge: non-runners + unprofitable runners (unchanged) + updated profitable runners
+        const allUpdatedLegs = [...nonRunnerLegs, ...unprofitableRunners, ...updatedProfitableLegs];
+
+        const trimmedRunners = updatedProfitableLegs.filter(
           leg => leg.type === 'RUNNER' && leg.status === 'CLOSED' && leg.closeTime === signal.timestamp
         );
         csvLogger.logPositionLegClosures(trimmedRunners, signal.asset, config.paperMode ? 'PAPER' : 'LIVE');
         runnersTrimmed += trimmedRunners.length;
 
-        updateAssetPositions(state, signal.asset, updatedLegs);
+        updateAssetPositions(state, signal.asset, allUpdatedLegs);
 
-        const runnersAfter = updatedLegs.filter(l => l.type === 'RUNNER' && l.status === 'OPEN').length;
-        log.info(`${signal.asset}: Trimmed ${runnersBefore - runnersAfter} runner(s)`);
+        log.info(`${signal.asset}: Trimmed ${trimmedRunners.length} runner(s)`);
       }
     }
   }

@@ -36,7 +36,6 @@ import {
   Logger,
   EventStore,
   JournalEmitter,
-  MarketContext,
 } from 'trading-bot-platform';
 import { loadMFIDailyConfig } from '../config/mfi-daily.js';
 import { getAllAssets, getAssetsBySymbols } from '../config/assets.js';
@@ -48,6 +47,7 @@ const INDICATOR_NAME = 'MFI';
 const STATE_FILE = process.env.BOT_STATE_FILE || 'state.json';
 
 let logger: Logger;
+let currentState: MultiAssetBotState | null = null;
 
 function getLogger(): Logger {
   if (!logger) {
@@ -62,6 +62,31 @@ function getLogger(): Logger {
     });
   }
   return logger;
+}
+
+// Graceful shutdown handlers
+function setupShutdownHandlers(): void {
+  const log = getLogger();
+
+  const shutdown = (signal: string) => {
+    log.info(`Received ${signal}, saving state before exit...`);
+    if (currentState) {
+      try {
+        const stateWithSnapshot = {
+          ...currentState,
+          indicatorSnapshot,
+        };
+        fs.writeFileSync(STATE_FILE, JSON.stringify(stateWithSnapshot, null, 2));
+        log.info('State saved successfully');
+      } catch (err) {
+        log.error('Failed to save state on shutdown:', err);
+      }
+    }
+    process.exit(0);
+  };
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
 // Indicator snapshot for dashboard display
@@ -130,6 +155,30 @@ function saveState(state: MultiAssetBotState): void {
   }
 }
 
+async function fetchCandlesWithRetry(
+  fetcher: BinanceFetcher,
+  limit: number,
+  log: Logger,
+  assetSymbol: string,
+  intervalLabel: string
+): Promise<Awaited<ReturnType<BinanceFetcher['fetchCandles']>>> {
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fetcher.fetchCandles(limit);
+    } catch (err) {
+      log.warn(`${assetSymbol}: Failed to fetch ${intervalLabel} candles (attempt ${attempt}/${maxAttempts})`, err);
+      if (attempt === maxAttempts) {
+        throw err;
+      }
+      const backoffMs = 1000 * Math.pow(2, attempt - 1);
+      await new Promise(resolve => setTimeout(resolve, backoffMs));
+    }
+  }
+
+  return [];
+}
+
 /**
  * Process a single asset
  */
@@ -151,7 +200,7 @@ async function processAsset(
   // Fetch candles
   const fetcher = new BinanceFetcher({ symbol: asset.binanceSymbol, interval: '1d' });
   const numCandles = Math.max(config.mfiPeriod, config.atrPeriod) * 2;
-  const candles = await fetcher.fetchCandles(numCandles);
+  const candles = await fetchCandlesWithRetry(fetcher, numCandles, log, asset.symbol, '1D');
   log.info(`Fetched ${candles.length} daily candles for ${asset.symbol}`);
 
   const latestCandle = candles[candles.length - 1];
@@ -211,8 +260,12 @@ async function processAsset(
     if (closedLegs.length > 0) {
       for (const leg of closedLegs) {
         log.info(`${asset.symbol}: ${leg.type} leg closed - ${leg.closeReason}`);
-        await broker.closeLeg(leg, latestCandle, leg.closeReason || 'Unknown');
-        csvLogger.logPositionLegClosure(leg, asset.symbol, config.paperMode ? 'PAPER' : 'LIVE');
+        try {
+          await broker.closeLeg(leg, latestCandle, leg.closeReason || 'Unknown');
+          csvLogger.logPositionLegClosure(leg, asset.symbol, config.paperMode ? 'PAPER' : 'LIVE');
+        } catch (err) {
+          log.error(`${asset.symbol}: Failed to close ${leg.type} leg ${leg.id}`, err);
+        }
       }
     }
 
@@ -292,14 +345,15 @@ async function runBotCycle() {
     const assets = getAssetsBySymbols(enabledSymbols);
 
     if (assets.length === 0) {
-      log.error('No enabled assets found for this bot');
-      return;
+      log.error('No enabled assets found for this bot - exiting');
+      process.exit(1);
     }
 
     log.info(`Trading ${assets.length} asset(s): ${assets.map(a => a.symbol).join(', ')}`);
 
     // Load state
     const state = loadState(allAssets);
+    currentState = state;
     log.info('State loaded', {
       totalOpenPositions: getTotalOpenPositions(state),
     });
@@ -382,10 +436,15 @@ async function runBotCycle() {
         config.wbtcMint
       );
 
+      if (balances.usdc < config.minUsdcReserve) {
+        log.error(`Insufficient USDC balance: ${balances.usdc.toFixed(2)} USDC (minimum reserve: ${config.minUsdcReserve})`);
+        process.exit(1);
+      }
+
       // Get current price for balance summary
       const firstAsset = assets[0];
       const fetcher = new BinanceFetcher({ symbol: firstAsset.binanceSymbol, interval: '1d' });
-      const recentCandles = await fetcher.fetchCandles(1);
+      const recentCandles = await fetchCandlesWithRetry(fetcher, 1, log, firstAsset.symbol, '1D');
       const currentPrice = recentCandles[0].close;
 
       log.info(getBalanceSummary(balances.usdc, balances.totalBtc, currentPrice));
@@ -394,6 +453,11 @@ async function runBotCycle() {
     // Show current position summary
     log.info(getMultiAssetSummary(state));
     log.info(`Total capital per full signal: $${getTotalCapitalPerSignal(allAssets)}`);
+
+    // Track cycle metrics
+    let positionsOpened = 0;
+    let positionsClosed = 0;
+    let runnersTrimmed = 0;
 
     // Process each asset
     const signals: AssetSignal[] = [];
@@ -500,6 +564,7 @@ async function runBotCycle() {
             assetPos.openLegs = [...assetPos.openLegs, ...newLegs];
             recordAssetTrade(state, signal.asset, signal.timestamp);
             log.info(`${signal.asset}: Position opened successfully`);
+            positionsOpened++;
 
             // Log to CSV
             const totalUSDC = newLegs.reduce((sum, leg) => sum + (leg.entryPrice * leg.quantity), 0);
@@ -577,6 +642,7 @@ async function runBotCycle() {
             leg => leg.type === 'RUNNER' && leg.status === 'CLOSED' && leg.closeTime === signal.timestamp
           );
           csvLogger.logPositionLegClosures(trimmedRunners, signal.asset, config.paperMode ? 'PAPER' : 'LIVE');
+          runnersTrimmed += trimmedRunners.length;
 
           updateAssetPositions(state, signal.asset, updatedLegs);
 
@@ -604,9 +670,9 @@ async function runBotCycle() {
     journal.cycleEnd(cycleEndMarket, {
       assetsProcessed: assets.length,
       signalsGenerated: signals.length,
-      positionsOpened: 0,
-      positionsClosed: 0,
-      runnersTrimmed: 0,
+      positionsOpened,
+      positionsClosed,
+      runnersTrimmed,
       cycleDurationMs: Date.now() - cycleStartTime,
     });
     journal.endCycle();
@@ -628,6 +694,7 @@ async function runBotCycle() {
  */
 async function main() {
   const log = getLogger();
+  setupShutdownHandlers();
   const config = loadMFIDailyConfig();
 
   if (config.continuousMode) {

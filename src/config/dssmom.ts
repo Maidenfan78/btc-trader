@@ -4,7 +4,7 @@
  * Configuration loader for the DSS-MOM (DSS Averages of Momentum) bot.
  */
 
-import { loadEnvConfig, getRequiredEnv, getOptionalEnv, getNumericEnv, getBooleanEnv, createLogger, Logger } from 'trading-bot-platform';
+import { loadEnvConfig, getRequiredEnv, getOptionalEnv, createLogger, Logger } from 'trading-bot-platform';
 import { DSSMOMConfig } from './types';
 
 // Load global env first, then per-bot env

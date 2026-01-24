@@ -6,7 +6,6 @@
  */
 
 import * as fs from 'fs';
-import * as path from 'path';
 import {
   BinanceFetcher,
   calculateMFISeries,
@@ -31,7 +30,8 @@ import {
   MultiAssetManagerConfig,
   EventStore,
   JournalEmitter,
-  MarketContext,
+  Logger,
+  getAllBalances,
 } from 'trading-bot-platform';
 import { loadMFI4HConfig, getMFI4HLogger } from '../config/mfi-4h.js';
 import { getAllAssets, getAssetsBySymbols } from '../config/assets.js';
@@ -39,6 +39,34 @@ import { getBotEnabledAssets } from '../config/bots.js';
 import { hydrateMultiAssetState } from '../config/state.js';
 
 const STATE_FILE = process.env.BOT_STATE_FILE || 'state-4h-mfi.json';
+
+// Module-level state reference for graceful shutdown
+let currentState: MultiAssetBotState | null = null;
+
+// Graceful shutdown handlers
+function setupShutdownHandlers(): void {
+  const log = getMFI4HLogger();
+
+  const shutdown = (signal: string) => {
+    log.info(`Received ${signal}, saving state before exit...`);
+    if (currentState) {
+      try {
+        const stateWithSnapshot = {
+          ...currentState,
+          indicatorSnapshot,
+        };
+        fs.writeFileSync(STATE_FILE, JSON.stringify(stateWithSnapshot, null, 2));
+        log.info('State saved successfully');
+      } catch (err) {
+        log.error('Failed to save state on shutdown:', err);
+      }
+    }
+    process.exit(0);
+  };
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+}
 
 function loadState(assets: AssetConfig[]): MultiAssetBotState {
   const log = getMFI4HLogger();
@@ -69,6 +97,29 @@ function saveState(state: MultiAssetBotState): void {
   } catch (error) {
     log.error('Failed to save state:', error);
   }
+}
+
+async function fetchCandlesWithRetry(
+  fetcher: BinanceFetcher,
+  limit: number,
+  log: Logger,
+  assetSymbol: string
+): Promise<Awaited<ReturnType<BinanceFetcher['fetchCandles']>>> {
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fetcher.fetchCandles(limit);
+    } catch (err) {
+      log.warn(`${assetSymbol}: Failed to fetch 4H candles (attempt ${attempt}/${maxAttempts})`, err);
+      if (attempt === maxAttempts) {
+        throw err;
+      }
+      const backoffMs = 1000 * Math.pow(2, attempt - 1);
+      await new Promise(resolve => setTimeout(resolve, backoffMs));
+    }
+  }
+
+  return [];
 }
 
 // Indicator snapshot for dashboard display
@@ -107,9 +158,12 @@ function createJournalEmitter(config: ReturnType<typeof loadMFI4HConfig>): Journ
 }
 
 function setBrokerTradeLegUsdc(broker: PaperBroker | LiveBroker, tradeLegUsdc: number): void {
+  const log = getMFI4HLogger();
   const mutable = broker as unknown as { config?: { tradeLegUsdc?: number } };
-  if (mutable.config) {
+  if (mutable.config && typeof mutable.config.tradeLegUsdc === 'number') {
     mutable.config.tradeLegUsdc = tradeLegUsdc;
+  } else {
+    log.warn(`Could not set tradeLegUsdc on broker - config structure mismatch`);
   }
 }
 
@@ -132,14 +186,15 @@ async function processAsset(
 
   // Fetch candles
   const fetcher = new BinanceFetcher({ symbol: asset.binanceSymbol, interval: '4h' });
-  const candles = await fetcher.fetchCandles(400);
+  const candles = await fetchCandlesWithRetry(fetcher, 400, log, asset.symbol);
   log.info(`Fetched ${candles.length} 4H candles for ${asset.symbol}`);
 
   // Calculate indicators
   const mfiSeries = calculateMFISeries(candles, config.mfiPeriod);
   const atrSeries = calculateATRSeries(candles, config.atrPeriod);
 
-  const currentIndex = candles.length - 2; // Last completed candle
+  // Use -2 to get the last COMPLETED candle (latest candle may be incomplete mid-bar)
+  const currentIndex = candles.length - 2;
   const currentMFI = mfiSeries[currentIndex];
   const previousMFI = mfiSeries[currentIndex - 1];
   const currentATR = atrSeries[currentIndex];
@@ -288,11 +343,16 @@ async function processAsset(
 async function runBotCycle4H() {
   const cycleStartTime = Date.now();
   const config = loadMFI4HConfig();
+  const log = getMFI4HLogger();
   const allAssets = getAllAssets();
   const enabledSymbols = getBotEnabledAssets('4h-mfi');
   const assets = getAssetsBySymbols(enabledSymbols);
+  if (assets.length === 0) {
+    log.error('No enabled assets found for this bot - exiting');
+    process.exit(1);
+  }
   const state = loadState(allAssets);
-  const log = getMFI4HLogger();
+  currentState = state; // Update module-level reference for graceful shutdown
 
   // Initialize journal emitter
   const journal = createJournalEmitter(config);
@@ -347,6 +407,20 @@ async function runBotCycle4H() {
       minUsdcReserve: config.minUsdcReserve,
     }, log);
     log.info('Live broker initialized');
+
+    const walletPublicKey = broker.getWalletPublicKey();
+    const connection = broker.getConnection();
+    const balances = await getAllBalances(
+      connection,
+      walletPublicKey,
+      config.usdcMint,
+      config.cbBtcMint || '',
+      config.wbtcMint
+    );
+    if (balances.usdc < config.minUsdcReserve) {
+      log.error(`Insufficient USDC balance: ${balances.usdc.toFixed(2)} USDC (minimum reserve: ${config.minUsdcReserve})`);
+      process.exit(1);
+    }
   }
 
   log.info(`Trading ${assets.length} assets: ${assets.map(a => a.symbol).join(', ')}`);
@@ -656,6 +730,7 @@ async function runBotCycle4H() {
  */
 async function main() {
   const log = getMFI4HLogger();
+  setupShutdownHandlers();
 
   try {
     const config = loadMFI4HConfig();

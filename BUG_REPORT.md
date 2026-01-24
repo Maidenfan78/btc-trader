@@ -1,5 +1,280 @@
 # Bug Report: btc-trader
 
+**Date:** 2026-01-24
+**Reviewer:** Claude Code (Opus 4.5)
+
+---
+
+## New Issues (2026-01-24)
+
+Code review identified **3 critical**, **3 high**, and **5 medium** severity issues.
+
+### CRITICAL
+
+#### BUG-009: Hard-coded Zeros in Journal Cycle End Events
+
+**Severity:** Critical
+**Files:** `src/bots/mfi-4h.ts:641-648`, `src/bots/tcf2.ts:536-538`, `src/bots/kpss.ts:518-520`, `src/bots/tdfi.ts:517-519`, `src/bots/dssmom.ts:518-520`, `src/bots/mfi-daily.ts:607-609`
+**Impact:** Forward-testing metrics are completely wrong. The journal always records 0 positions opened/closed/trimmed regardless of actual activity.
+**Status:** Closed
+
+**Current Code:**
+```typescript
+journal.cycleEnd(cycleEndMarket, {
+  assetsProcessed: assets.length,
+  signalsGenerated: signals.length,
+  positionsOpened: 0,  // ALWAYS ZERO
+  positionsClosed: 0,  // ALWAYS ZERO
+  runnersTrimmed: 0,   // ALWAYS ZERO
+  cycleDurationMs: Date.now() - cycleStartTime,
+});
+```
+
+**Intended Fix:** Track metrics during signal processing loop:
+```typescript
+let positionsOpened = 0;
+let positionsClosed = 0;
+let runnersTrimmed = 0;
+
+// In signal processing loop:
+if (newLegs && newLegs.length > 0) positionsOpened++;
+positionsClosed += closedLegs.length;
+if (trimmedLegs && trimmedLegs.length > 0) runnersTrimmed++;
+
+// Then pass actual values to journal.cycleEnd()
+```
+
+---
+
+#### BUG-010: Missing `await` on Async Broker Methods
+
+**Severity:** Critical
+**Files:** `src/bots/mfi-4h.ts:469,572`, `src/bots/tcf2.ts:423,526`, `src/bots/kpss.ts:418,511`, `src/bots/tdfi.ts:417,510`, `src/bots/dssmom.ts:418,511`
+**Impact:** Race conditions in trade execution. Trades may execute out of order, state may be corrupted, potential money loss. The CLAUDE.md explicitly warns about this.
+**Status:** Closed
+
+**Current Code:**
+```typescript
+const newLegs = broker.openPosition(brokerSignal, candle);      // Missing await
+const updatedLegs = broker.trimRunners(runnerLegs, candle);     // Missing await
+```
+
+**Intended Fix:** Add `await` keyword:
+```typescript
+const newLegs = await broker.openPosition(brokerSignal, candle);
+const updatedLegs = await broker.trimRunners(runnerLegs, candle);
+```
+
+---
+
+#### BUG-011: Unsafe Type Casting for Broker Config
+
+**Severity:** Critical
+**Files:** `src/bots/mfi-4h.ts:109-113`, `src/bots/tcf2.ts:105-109`, `src/bots/kpss.ts:105-109`, `src/bots/tdfi.ts:105-109`, `src/bots/dssmom.ts:105-109`
+**Impact:** Per-asset trade leg sizing may fail silently if broker structure changes. Uses `as unknown as {...}` to bypass TypeScript.
+**Status:** Closed
+
+**Current Code:**
+```typescript
+function setBrokerTradeLegUsdc(broker: PaperBroker | LiveBroker, tradeLegUsdc: number): void {
+  const mutable = broker as unknown as { config?: { tradeLegUsdc?: number } };
+  if (mutable.config) {
+    mutable.config.tradeLegUsdc = tradeLegUsdc;
+  }
+}
+```
+
+**Intended Fix:** Add runtime validation or use platform API if available:
+```typescript
+function setBrokerTradeLegUsdc(broker: PaperBroker | LiveBroker, tradeLegUsdc: number): void {
+  const mutable = broker as unknown as { config?: { tradeLegUsdc?: number } };
+  if (mutable.config && typeof mutable.config.tradeLegUsdc === 'number') {
+    mutable.config.tradeLegUsdc = tradeLegUsdc;
+  } else {
+    log.warn(`Could not set tradeLegUsdc on broker - config structure mismatch`);
+  }
+}
+```
+
+---
+
+### HIGH
+
+#### BUG-012: Missing Error Handling on closeLeg
+
+**Severity:** High
+**File:** `src/bots/mfi-daily.ts:214`
+**Impact:** If broker fails to close a leg, the bot continues as if it succeeded. Orphaned positions possible.
+**Status:** Closed
+
+**Current Code:**
+```typescript
+for (const leg of closedLegs) {
+  log.info(`${asset.symbol}: ${leg.type} leg closed - ${leg.closeReason}`);
+  await broker.closeLeg(leg, latestCandle, leg.closeReason || 'Unknown');
+  csvLogger.logPositionLegClosure(leg, asset.symbol, config.paperMode ? 'PAPER' : 'LIVE');
+}
+```
+
+**Intended Fix:** Add try-catch with logging:
+```typescript
+for (const leg of closedLegs) {
+  log.info(`${asset.symbol}: ${leg.type} leg closed - ${leg.closeReason}`);
+  try {
+    await broker.closeLeg(leg, latestCandle, leg.closeReason || 'Unknown');
+    csvLogger.logPositionLegClosure(leg, asset.symbol, config.paperMode ? 'PAPER' : 'LIVE');
+  } catch (err) {
+    log.error(`${asset.symbol}: Failed to close ${leg.type} leg ${leg.id}`, err);
+    // Consider: should we continue or abort the cycle?
+  }
+}
+```
+
+---
+
+#### BUG-013: Off-by-One in Candle Index (4H Bots)
+
+**Severity:** High
+**Files:** `src/bots/mfi-4h.ts:142-146`, similar in tcf2, kpss, tdfi, dssmom
+**Impact:** Analysis may be one candle behind. Daily bot uses `candles.length - 1`, 4H bots use `candles.length - 2`.
+**Status:** Closed
+
+**Current Code:**
+```typescript
+const currentIndex = candles.length - 2; // Last COMPLETED candle
+const currentCandle = candles[currentIndex];
+```
+
+**Fix Applied:** Clarified intent with comment in all 4H bots to keep `-2` (skip potentially incomplete candle):
+```typescript
+// Use -2 to get the last COMPLETED candle (latest candle may be incomplete mid-bar)
+const currentIndex = candles.length - 2;
+```
+
+---
+
+#### BUG-014: Dashboard Route Injection Fragility
+
+**Severity:** High
+**File:** `src/dashboard.ts:204-221`
+**Impact:** Custom routes may not work if platform changes `notFoundHandler` name.
+**Status:** Closed
+
+**Current Code:**
+```typescript
+const notFoundIndex = stack.findIndex(
+  (layer: any) => layer.name === 'notFoundHandler'
+);
+if (notFoundIndex !== -1) {
+  const newLayers = stack.splice(stackLengthBefore);
+  stack.splice(notFoundIndex, 0, ...newLayers);
+} else {
+  console.log('Custom routes added (404 handler not found)');
+}
+```
+
+**Fix Applied:** Added warning log to flag missing 404 handler and guide future adjustments:
+```typescript
+if (notFoundIndex !== -1) {
+  const newLayers = stack.splice(stackLengthBefore);
+  stack.splice(notFoundIndex, 0, ...newLayers);
+} else {
+  console.warn('WARNING: 404 handler not found - custom routes may not work correctly');
+  console.warn('Consider updating route injection logic if platform changed');
+}
+```
+
+---
+
+### MEDIUM
+
+#### BUG-015: No State Flush on Graceful Shutdown
+
+**Severity:** Medium
+**Files:** All bot files
+**Impact:** If bot crashes between cycles, latest state changes are lost.
+**Status:** Closed
+
+**Fix Applied:** Added SIGINT/SIGTERM handlers to flush state before exit:
+```typescript
+process.on('SIGINT', async () => {
+  log.info('Received SIGINT, saving state before exit...');
+  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+  process.exit(0);
+});
+```
+
+---
+
+#### BUG-016: Timing Edge Cases in Continuous Mode
+
+**Severity:** Medium
+**File:** `src/continuous/4h.ts:92`
+**Impact:** If bot cycle takes longer than windowMs (30-60 min), next cycle is skipped.
+**Status:** Closed
+
+**Fix Applied:** Added catch-up execution with warning when the execution window is missed.
+
+---
+
+#### BUG-017: Empty Asset List Not Fatal
+
+**Severity:** Medium
+**Files:** All bot files
+**Impact:** Bot runs but does nothing if no assets configured. User doesn't realize it's broken.
+**Status:** Closed
+
+**Current Code:**
+```typescript
+if (assets.length === 0) {
+  log.error('No enabled assets found for this bot');
+  return;  // Returns silently
+}
+```
+
+**Fix Applied:** Exit with non-zero code when no assets are enabled:
+```typescript
+if (assets.length === 0) {
+  log.error('No enabled assets found for this bot - exiting');
+  process.exit(1);
+}
+```
+
+---
+
+#### BUG-018: No Retry on Binance Fetch Failure
+
+**Severity:** Medium
+**Files:** All bot files in `processAsset` function
+**Impact:** Single network hiccup stops entire bot cycle.
+**Status:** Closed
+
+**Fix Applied:** Added retry logic with exponential backoff (3 attempts) around candle fetches.
+
+---
+
+#### BUG-019: No Wallet Validation Before Live Trading
+
+**Severity:** Medium
+**Files:** All bot files when initializing LiveBroker
+**Impact:** Silent trade failures if wallet is invalid/empty.
+**Status:** Closed
+
+**Fix Applied:** Added startup balance check in live mode (USDC reserve):
+```typescript
+if (!config.paperMode) {
+  const balances = await getAllBalances(connection, walletPublicKey, config.usdcMint, config.cbBtcMint, config.wbtcMint);
+  if (balances.usdc < config.minUsdcReserve) {
+    log.error(`Insufficient USDC balance: ${balances.usdc} USDC (minimum reserve: ${config.minUsdcReserve})`);
+    process.exit(1);
+  }
+}
+```
+
+---
+
+## Previous Issues (2026-01-21)
+
 **Date:** 2026-01-21
 **Reviewer:** Codex
 

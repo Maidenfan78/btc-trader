@@ -4,7 +4,7 @@
  * Configuration loader for the TDFI (Trend Direction & Force Index) bot.
  */
 
-import { loadEnvConfig, getRequiredEnv, getOptionalEnv, getNumericEnv, getBooleanEnv, createLogger, Logger } from 'trading-bot-platform';
+import { loadEnvConfig, getRequiredEnv, getOptionalEnv, createLogger, Logger } from 'trading-bot-platform';
 import { TDFIConfig } from './types';
 
 // Load global env first, then per-bot env

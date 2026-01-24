@@ -217,7 +217,8 @@ async function main() {
       stack.splice(notFoundIndex, 0, ...newLayers);
       console.log('Custom routes inserted before 404 handler');
     } else {
-      console.log('Custom routes added (404 handler not found)');
+      console.warn('WARNING: 404 handler not found in router stack - custom routes may not work correctly');
+      console.warn('If platform updated notFoundHandler name, update route injection logic in dashboard.ts');
     }
 
     await dashboard.start();

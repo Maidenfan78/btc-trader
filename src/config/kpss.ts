@@ -4,7 +4,7 @@
  * Configuration loader for the KPSS (Kase Permission Stochastic Smoothed) bot.
  */
 
-import { loadEnvConfig, getRequiredEnv, getOptionalEnv, getNumericEnv, getBooleanEnv, createLogger, Logger } from 'trading-bot-platform';
+import { loadEnvConfig, getRequiredEnv, getOptionalEnv, createLogger, Logger } from 'trading-bot-platform';
 import { KPSSConfig } from './types';
 
 // Load global env first, then per-bot env

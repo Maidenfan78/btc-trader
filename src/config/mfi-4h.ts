@@ -4,7 +4,7 @@
  * Configuration loader for the 4H multi-asset MFI bot.
  */
 
-import { loadEnvConfig, getRequiredEnv, getOptionalEnv, getNumericEnv, getBooleanEnv, createLogger, Logger } from 'trading-bot-platform';
+import { loadEnvConfig, getRequiredEnv, getOptionalEnv, createLogger, Logger } from 'trading-bot-platform';
 import { MultiAssetConfig } from './types';
 
 // Load global env first, then per-bot env

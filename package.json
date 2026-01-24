@@ -14,17 +14,28 @@
     "dev": "ts-node src/index.ts",
     "dev:runner": "ts-node src/bot-runner.ts",
     "dev:dashboard": "ts-node src/dashboard.ts",
-    "dev:ui": "ts-node src/ui-server.ts"
+    "dev:ui": "ts-node src/ui-server.ts",
+    "lint": "eslint src tests --ext .ts",
+    "lint:fix": "eslint src tests --ext .ts --fix",
+    "test": "cross-env VITE_CJS_IGNORE_WARNING=1 vitest run",
+    "test:watch": "cross-env VITE_CJS_IGNORE_WARNING=1 vitest",
+    "test:ci": "cross-env VITE_CJS_IGNORE_WARNING=1 vitest run --reporter=verbose",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "trading-bot-platform": "file:../trading-bot-platform",
     "@jup-ag/api": "^6.0.48",
-    "@solana/spl-token": "^0.4.14",
-    "@solana/web3.js": "^1.98.4"
+    "@solana/spl-token": "^0.1.8",
+    "@solana/web3.js": "^1.98.4",
+    "trading-bot-platform": "file:../trading-bot-platform"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "cross-env": "^7.0.3",
+    "eslint": "^8.57.1",
     "ts-node": "^10.9.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^4.0.18"
   }
 }

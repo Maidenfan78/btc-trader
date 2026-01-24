@@ -88,9 +88,20 @@ export async function startContinuous4H(
         ? 60 * 60 * 1000
         : 30 * 60 * 1000;
     const windowEnd = executionTime + windowMs;
+    const now = Date.now();
 
-    if (Date.now() >= executionTime && Date.now() <= windowEnd && lastCandleClose > lastExecutedCandle) {
+    if (now >= executionTime && now <= windowEnd && lastCandleClose > lastExecutedCandle) {
       log.info(`${getTimeframeLabel()} candle closed at ${new Date(lastCandleClose).toISOString()}, executing bot cycle...`);
+      lastExecutedCandle = lastCandleClose;
+
+      try {
+        await runBotCycle();
+      } catch (error) {
+        log.error('Bot cycle failed:', error);
+      }
+    } else if (now > windowEnd && lastCandleClose > lastExecutedCandle) {
+      const lateMinutes = Math.round((now - windowEnd) / 60000);
+      log.warn(`${getTimeframeLabel()} execution window missed by ${lateMinutes} minutes - running catch-up cycle...`);
       lastExecutedCandle = lastCandleClose;
 
       try {

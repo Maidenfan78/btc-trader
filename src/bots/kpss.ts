@@ -30,7 +30,8 @@ import {
   MultiAssetManagerConfig,
   EventStore,
   JournalEmitter,
-  MarketContext,
+  Logger,
+  getAllBalances,
 } from 'trading-bot-platform';
 import { loadKPSSConfig, getKPSSLogger } from '../config/kpss.js';
 import { getAllAssets, getAssetsBySymbols } from '../config/assets.js';
@@ -41,6 +42,35 @@ const BOT_ID = 'kpss';
 const INDICATOR_NAME = 'KPSS';
 
 const STATE_FILE = process.env.BOT_STATE_FILE || 'state-kpss.json';
+
+// Module-level state reference for graceful shutdown
+let currentState: MultiAssetBotState | null = null;
+
+// Graceful shutdown handlers
+function setupShutdownHandlers(): void {
+  const log = getKPSSLogger();
+
+  const shutdown = (signal: string) => {
+    log.info(`Received ${signal}, saving state before exit...`);
+    if (currentState) {
+      try {
+        const stateWithSnapshot = {
+          ...currentState,
+          indicatorSnapshot,
+        };
+        fs.writeFileSync(STATE_FILE, JSON.stringify(stateWithSnapshot, null, 2));
+        log.info('State saved successfully');
+      } catch (err) {
+        log.error('Failed to save state on shutdown:', err);
+      }
+    }
+    process.exit(0);
+  };
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+}
+
 const TIMEFRAME = (process.env.BOT_TIMEFRAME || '4h').toLowerCase() === 'd1'
   ? '1d'
   : (process.env.BOT_TIMEFRAME || '4h').toLowerCase() as BinanceInterval;
@@ -103,9 +133,12 @@ function createJournalEmitter(config: ReturnType<typeof loadKPSSConfig>): Journa
 }
 
 function setBrokerTradeLegUsdc(broker: PaperBroker | LiveBroker, tradeLegUsdc: number): void {
+  const log = getKPSSLogger();
   const mutable = broker as unknown as { config?: { tradeLegUsdc?: number } };
-  if (mutable.config) {
+  if (mutable.config && typeof mutable.config.tradeLegUsdc === 'number') {
     mutable.config.tradeLegUsdc = tradeLegUsdc;
+  } else {
+    log.warn(`Could not set tradeLegUsdc on broker - config structure mismatch`);
   }
 }
 
@@ -123,6 +156,29 @@ function saveState(state: MultiAssetBotState): void {
   }
 }
 
+async function fetchCandlesWithRetry(
+  fetcher: BinanceFetcher,
+  limit: number,
+  log: Logger,
+  assetSymbol: string
+): Promise<Awaited<ReturnType<BinanceFetcher['fetchCandles']>>> {
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fetcher.fetchCandles(limit);
+    } catch (err) {
+      log.warn(`${assetSymbol}: Failed to fetch ${getTimeframeLabel()} candles (attempt ${attempt}/${maxAttempts})`, err);
+      if (attempt === maxAttempts) {
+        throw err;
+      }
+      const backoffMs = 1000 * Math.pow(2, attempt - 1);
+      await new Promise(resolve => setTimeout(resolve, backoffMs));
+    }
+  }
+
+  return [];
+}
+
 async function processAsset(
   asset: AssetConfig,
   state: MultiAssetBotState,
@@ -138,7 +194,7 @@ async function processAsset(
   log.info('='.repeat(60));
 
   const fetcher = new BinanceFetcher({ symbol: asset.binanceSymbol, interval: TIMEFRAME });
-  const candles = await fetcher.fetchCandles(400);
+  const candles = await fetchCandlesWithRetry(fetcher, 400, log, asset.symbol);
   log.info(`Fetched ${candles.length} ${getTimeframeLabel()} candles for ${asset.symbol}`);
 
   const kpssSeries = calculateKPSSSeries(candles, config.kpssPeriod, config.kpssSmooth);
@@ -149,6 +205,8 @@ async function processAsset(
     return null;
   }
 
+  // Use -2 to get the last COMPLETED candle (latest candle may be incomplete mid-bar)
+  // Use -2 to get the last COMPLETED candle (latest candle may be incomplete mid-bar)
   const currentIndex = candles.length - 2;
   const kpssIndex = kpssSeries.length - 2;
   const currentKPSS = kpssSeries[kpssIndex + 1];
@@ -264,7 +322,13 @@ async function runBotCycleKPSS() {
   const allAssets = getAllAssets();
   const enabledSymbols = getBotEnabledAssets('kpss');
   const assets = getAssetsBySymbols(enabledSymbols);
+  if (assets.length === 0) {
+    const log = getKPSSLogger();
+    log.error('No enabled assets found for this bot - exiting');
+    process.exit(1);
+  }
   const state = loadState(allAssets);
+  currentState = state; // Update module-level reference for graceful shutdown
   const log = getKPSSLogger();
   const cycleStartTime = Date.now();
   const journal = createJournalEmitter(config);
@@ -316,6 +380,20 @@ async function runBotCycleKPSS() {
       minUsdcReserve: config.minUsdcReserve,
     }, log);
     log.info('Live broker initialized');
+
+    const walletPublicKey = broker.getWalletPublicKey();
+    const connection = broker.getConnection();
+    const balances = await getAllBalances(
+      connection,
+      walletPublicKey,
+      config.usdcMint,
+      config.cbBtcMint || '',
+      config.wbtcMint
+    );
+    if (balances.usdc < config.minUsdcReserve) {
+      log.error(`Insufficient USDC balance: ${balances.usdc.toFixed(2)} USDC (minimum reserve: ${config.minUsdcReserve})`);
+      process.exit(1);
+    }
   }
 
   log.info(`Trading ${assets.length} assets: ${assets.map(a => a.symbol).join(', ')}`);
@@ -333,6 +411,11 @@ async function runBotCycleKPSS() {
     assetsToProcess: assets.map(a => a.symbol),
     totalOpenPositions: getTotalOpenPositions(state),
   });
+
+  // Track cycle metrics
+  let positionsOpened = 0;
+  let positionsClosed = 0;
+  let runnersTrimmed = 0;
 
   const signals: AssetSignal[] = [];
   for (const asset of assets) {
@@ -423,6 +506,7 @@ async function runBotCycleKPSS() {
           assetPos.openLegs = [...assetPos.openLegs, ...newLegs];
           recordAssetTrade(state, signal.asset, signal.timestamp);
           log.info(`${signal.asset}: Position opened successfully`);
+          positionsOpened++;
 
           const totalUSDC = newLegs.reduce((sum, leg) => sum + (leg.entryPrice * leg.quantity), 0);
           const totalQty = newLegs.reduce((sum, leg) => sum + leg.quantity, 0);
@@ -483,6 +567,7 @@ async function runBotCycleKPSS() {
           leg => leg.type === 'RUNNER' && leg.status === 'CLOSED' && leg.closeTime === signal.timestamp
         );
         csvLogger.logPositionLegClosures(trimmedRunners, signal.asset, config.paperMode ? 'PAPER' : 'LIVE');
+        runnersTrimmed += trimmedRunners.length;
 
         updateAssetPositions(state, signal.asset, updatedLegs);
 
@@ -515,9 +600,9 @@ async function runBotCycleKPSS() {
   journal.cycleEnd(cycleEndMarket, {
     assetsProcessed: assets.length,
     signalsGenerated: signals.length,
-    positionsOpened: 0,
-    positionsClosed: 0,
-    runnersTrimmed: 0,
+    positionsOpened,
+    positionsClosed,
+    runnersTrimmed,
     cycleDurationMs: Date.now() - cycleStartTime,
   });
   journal.endCycle();
@@ -527,6 +612,7 @@ async function runBotCycleKPSS() {
 
 async function main() {
   const log = getKPSSLogger();
+  setupShutdownHandlers();
 
   try {
     const config = loadKPSSConfig();

@@ -69,7 +69,7 @@ function isInExecutionWindow(
 function getNextCheckTime(
   lastProcessedTime: number,
   executionOffsetMinutes: number,
-  checkIntervalMinutes: number
+  _checkIntervalMinutes: number
 ): { sleepMs: number; reason: string } {
   const msSinceCandle = getMillisecondsSinceLastCandle();
   const offsetMs = executionOffsetMinutes * 60 * 1000;

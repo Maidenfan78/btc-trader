@@ -4,7 +4,7 @@
  * Configuration loader for the TCF2 (Trend Continuation Factor 2) bot.
  */
 
-import { loadEnvConfig, getRequiredEnv, getOptionalEnv, getNumericEnv, getBooleanEnv, createLogger, Logger } from 'trading-bot-platform';
+import { loadEnvConfig, getRequiredEnv, getOptionalEnv, createLogger, Logger } from 'trading-bot-platform';
 import { TCF2Config } from './types';
 
 // Load global env first, then per-bot env

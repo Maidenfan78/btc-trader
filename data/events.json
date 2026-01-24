@@ -169,7 +169,141 @@
       },
       "cycleId": "849679c0-6349-4836-a268-05306f765585",
       "mode": "PAPER"
+    },
+    {
+      "id": "176f36b1-ea4a-48a6-abe5-f56aa3c8b2bf",
+      "timestamp": 1769219490270,
+      "botId": "4h-mfi",
+      "asset": "*",
+      "category": "CYCLE",
+      "type": "CYCLE_START",
+      "market": {
+        "price": 0,
+        "indicator": 0,
+        "indicatorName": "MFI",
+        "atr": 0,
+        "atrPercent": null,
+        "trend": "BEARISH",
+        "volatility": "NORMAL",
+        "candleTime": 1769219490270
+      },
+      "payload": {
+        "assetsToProcess": [
+          "wETH",
+          "SOL",
+          "JUP"
+        ],
+        "totalOpenPositions": 0
+      },
+      "cycleId": "de5b5131-ad1b-45d7-aac1-f74273afc1f6",
+      "mode": "PAPER"
+    },
+    {
+      "id": "41a29caf-d216-4d3f-9b34-1cc5aa6b8fa6",
+      "timestamp": 1769219490538,
+      "botId": "4h-mfi",
+      "asset": "wETH",
+      "category": "SIGNAL",
+      "type": "NO_SIGNAL",
+      "market": {
+        "price": 2956.41,
+        "indicator": 57.695664937822336,
+        "indicatorName": "MFI",
+        "atr": 63.75785714285718,
+        "atrPercent": 2.1565972629931975,
+        "trend": "NEUTRAL",
+        "volatility": "NORMAL",
+        "candleTime": 1769198400000
+      },
+      "payload": {
+        "indicatorValue": 57.695664937822336,
+        "buyLevel": 30,
+        "sellLevel": 70,
+        "reason": "MFI between levels"
+      },
+      "cycleId": "de5b5131-ad1b-45d7-aac1-f74273afc1f6",
+      "mode": "PAPER"
+    },
+    {
+      "id": "b5a2424c-217c-4a19-a85a-6bfc027c2513",
+      "timestamp": 1769219490697,
+      "botId": "4h-mfi",
+      "asset": "SOL",
+      "category": "SIGNAL",
+      "type": "NO_SIGNAL",
+      "market": {
+        "price": 127.43,
+        "indicator": 54.579599996223,
+        "indicatorName": "MFI",
+        "atr": 2.2835714285714226,
+        "atrPercent": 1.792020268831062,
+        "trend": "NEUTRAL",
+        "volatility": "NORMAL",
+        "candleTime": 1769198400000
+      },
+      "payload": {
+        "indicatorValue": 54.579599996223,
+        "buyLevel": 30,
+        "sellLevel": 70,
+        "reason": "MFI between levels"
+      },
+      "cycleId": "de5b5131-ad1b-45d7-aac1-f74273afc1f6",
+      "mode": "PAPER"
+    },
+    {
+      "id": "df9cac6f-06d3-457a-bcb9-4b5a760f3581",
+      "timestamp": 1769219490869,
+      "botId": "4h-mfi",
+      "asset": "JUP",
+      "category": "SIGNAL",
+      "type": "NO_SIGNAL",
+      "market": {
+        "price": 0.1944,
+        "indicator": 47.955157678362276,
+        "indicatorName": "MFI",
+        "atr": 0.004885714285714291,
+        "atrPercent": 2.513227513227516,
+        "trend": "NEUTRAL",
+        "volatility": "NORMAL",
+        "candleTime": 1769198400000
+      },
+      "payload": {
+        "indicatorValue": 47.955157678362276,
+        "buyLevel": 30,
+        "sellLevel": 70,
+        "reason": "MFI between levels"
+      },
+      "cycleId": "de5b5131-ad1b-45d7-aac1-f74273afc1f6",
+      "mode": "PAPER"
+    },
+    {
+      "id": "39b52347-713f-411c-9b61-ced1785b0ee2",
+      "timestamp": 1769219490871,
+      "botId": "4h-mfi",
+      "asset": "*",
+      "category": "CYCLE",
+      "type": "CYCLE_END",
+      "market": {
+        "price": 0,
+        "indicator": 0,
+        "indicatorName": "MFI",
+        "atr": 0,
+        "atrPercent": null,
+        "trend": "BEARISH",
+        "volatility": "NORMAL",
+        "candleTime": 1769219490871
+      },
+      "payload": {
+        "assetsProcessed": 3,
+        "signalsGenerated": 0,
+        "positionsOpened": 0,
+        "positionsClosed": 0,
+        "runnersTrimmed": 0,
+        "cycleDurationMs": 606
+      },
+      "cycleId": "de5b5131-ad1b-45d7-aac1-f74273afc1f6",
+      "mode": "PAPER"
     }
   ],
-  "lastUpdated": 1768820736480
+  "lastUpdated": 1769219490871
 }

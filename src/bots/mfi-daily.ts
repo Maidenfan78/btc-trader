@@ -189,7 +189,8 @@ async function processAsset(
   broker: PaperBroker | LiveBroker,
   csvLogger: ReturnType<typeof createTradingCSVLogger>,
   circuitBreaker: CircuitBreaker,
-  journal: JournalEmitter
+  journal: JournalEmitter,
+  cycleMetrics: { positionsClosed: number }
 ): Promise<AssetSignal | null> {
   const log = getLogger();
 
@@ -267,6 +268,8 @@ async function processAsset(
           log.error(`${asset.symbol}: Failed to close ${leg.type} leg ${leg.id}`, err);
         }
       }
+
+      cycleMetrics.positionsClosed += closedLegs.length;
     }
 
     updateAssetPositions(state, asset.symbol, updatedLegs);
@@ -456,14 +459,14 @@ async function runBotCycle() {
 
     // Track cycle metrics
     let positionsOpened = 0;
-    let positionsClosed = 0;
+    const cycleMetrics = { positionsClosed: 0 };
     let runnersTrimmed = 0;
 
     // Process each asset
     const signals: AssetSignal[] = [];
     for (const asset of assets) {
       try {
-        const signal = await processAsset(asset, state, config, broker, csvLogger, circuitBreaker, journal);
+        const signal = await processAsset(asset, state, config, broker, csvLogger, circuitBreaker, journal, cycleMetrics);
         if (signal) {
           signals.push(signal);
         }
@@ -671,7 +674,7 @@ async function runBotCycle() {
       assetsProcessed: assets.length,
       signalsGenerated: signals.length,
       positionsOpened,
-      positionsClosed,
+      positionsClosed: cycleMetrics.positionsClosed,
       runnersTrimmed,
       cycleDurationMs: Date.now() - cycleStartTime,
     });

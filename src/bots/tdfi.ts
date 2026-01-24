@@ -185,7 +185,8 @@ async function processAsset(
   config: ReturnType<typeof loadTDFIConfig>,
   broker: PaperBroker | LiveBroker,
   csvLogger: ReturnType<typeof createTradingCSVLogger>,
-  journal: JournalEmitter
+  journal: JournalEmitter,
+  cycleMetrics: { positionsClosed: number }
 ): Promise<AssetSignal | null> {
   const log = getTDFILogger();
 
@@ -265,8 +266,15 @@ async function processAsset(
     if (closedLegs.length > 0) {
       for (const leg of closedLegs) {
         log.info(`${asset.symbol}: ${leg.type} leg closed - ${leg.closeReason}`);
+        try {
+          await broker.closeLeg(leg, currentCandle, leg.closeReason || 'Unknown');
+        } catch (err) {
+          log.error(`${asset.symbol}: Failed to close ${leg.type} leg ${leg.id}`, err);
+        }
         csvLogger.logPositionLegClosure(leg, asset.symbol, config.paperMode ? 'PAPER' : 'LIVE');
       }
+
+      cycleMetrics.positionsClosed += closedLegs.length;
     }
 
     updateAssetPositions(state, asset.symbol, updatedLegs);
@@ -413,13 +421,13 @@ async function runBotCycleTDFI() {
 
   // Track cycle metrics
   let positionsOpened = 0;
-  let positionsClosed = 0;
+  const cycleMetrics = { positionsClosed: 0 };
   let runnersTrimmed = 0;
 
   const signals: AssetSignal[] = [];
   for (const asset of assets) {
     try {
-      const signal = await processAsset(asset, state, config, broker, csvLogger, journal);
+      const signal = await processAsset(asset, state, config, broker, csvLogger, journal, cycleMetrics);
       if (signal) {
         signals.push(signal);
       }
@@ -600,7 +608,7 @@ async function runBotCycleTDFI() {
     assetsProcessed: assets.length,
     signalsGenerated: signals.length,
     positionsOpened,
-    positionsClosed,
+    positionsClosed: cycleMetrics.positionsClosed,
     runnersTrimmed,
     cycleDurationMs: Date.now() - cycleStartTime,
   });

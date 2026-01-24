@@ -273,6 +273,50 @@ if (!config.paperMode) {
 
 ---
 
+## New Issues (2026-01-24)
+
+Code review identified **1 high** and **1 medium** severity issue.
+
+### HIGH
+
+#### BUG-020: Live Bots Do Not Execute On-Chain Closes
+
+**Severity:** High
+**Files:** `src/bots/mfi-4h.ts`, `src/bots/tcf2.ts`, `src/bots/kpss.ts`, `src/bots/tdfi.ts`, `src/bots/dssmom.ts`
+**Impact:** In live mode, TP/trailing-stop closures are only recorded in state. The broker is never asked to close legs on-chain, so real positions can remain open while state says closed.
+**Status:** Closed
+
+**Current Code (pattern):**
+```typescript
+const updatedLegs = updatePositions(...);
+const closedLegs = updatedLegs.filter(...); // only logs/CSV/journal
+updateAssetPositions(state, asset.symbol, updatedLegs);
+```
+
+**Fix Applied:** Added broker close calls for newly closed legs and guarded with error logging during close attempts.
+
+---
+
+### MEDIUM
+
+#### BUG-021: positionsClosed Metrics Never Incremented
+
+**Severity:** Medium
+**Files:** `src/bots/mfi-4h.ts`, `src/bots/tcf2.ts`, `src/bots/kpss.ts`, `src/bots/tdfi.ts`, `src/bots/dssmom.ts`, `src/bots/mfi-daily.ts`
+**Impact:** Journal cycle summaries always report zero closed positions, even when legs are closed.
+**Status:** Closed
+
+**Current Code (pattern):**
+```typescript
+let positionsClosed = 0;
+// positionsClosed never updated
+journal.cycleEnd(..., { positionsClosed, ... });
+```
+
+**Fix Applied:** Incremented `positionsClosed` when newly closed legs are detected per cycle.
+
+---
+
 ## Previous Issues (2026-01-21)
 
 **Date:** 2026-01-21
